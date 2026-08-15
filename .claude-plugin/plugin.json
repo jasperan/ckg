@@ -19,13 +19,13 @@
     "graphrag"
   ],
   "hooks": {
-    "BeforePrompt": [
+    "UserPromptSubmit": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 hooks/before_prompt.py"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/hooks/before_prompt.py"
           }
         ]
       }

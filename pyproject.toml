@@ -21,11 +21,15 @@ dependencies = [
     "pyyaml>=6.0",
     "oracledb>=3.4",
     "oracleagentmemory>=26.6.0",
+    "langchain-oracledb>=1.0.0",
+    "langgraph-oracledb>=1.0.0",
 ]
 
 [project.optional-dependencies]
 oracle = [
     "oracleagentmemory>=26.4.0",
+    "langchain-oracledb>=1.0.0",
+    "langgraph-oracledb>=1.0.0",
 ]
 dev = [
     "pytest>=8.0",

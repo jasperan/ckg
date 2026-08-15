@@ -24,6 +24,25 @@ hops: 2
 top_k: 10
 
 # --- Oracle PGQ (optional) ----------------------------------------------------
+#
+# Oracle AI Database 26ai Free is fully optional. When CKG_ORACLE_DSN is set,
+# retrieval runs GRAPH_TABLE ... MATCH in the database (PGQ); otherwise ckg
+# falls back to in-memory traversal. All values can be overridden by env:
+#
+#   CKG_ORACLE_DSN            e.g. "localhost:1521/FREEPDB1" (unset → memory mode)
+#   CKG_ORACLE_USER           default "dmuser"
+#   CKG_ORACLE_PASSWORD       default "continual_learning"
+#   CKG_ORACLE_DOMAIN         default "default"
+#   CKG_ORACLE_GRAPH          default "ckg_code_graph"
+#   CKG_ORACLE_TABLE_PREFIX   default "MEMORY_GRAPH"
+#
+# Quick start (docker):
+#   docker run -d --name ckg-oracle -p 1521:1521 \
+#     -e ORACLE_PWD=continual_learning \
+#     container-registry.oracle.com/database/free:latest
+#   export CKG_ORACLE_DSN=localhost:1521/FREEPDB1 CKG_ORACLE_USER=dmuser \
+#          CKG_ORACLE_PASSWORD=continual_learning
+#   ckg load .   # parse + store the graph into PGQ
 
 # Domain name for PGQ graph scoping.
 domain: "default"

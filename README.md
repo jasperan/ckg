@@ -3,11 +3,13 @@
 </p>
 
 <p align="center">
-  <strong>Structure-aware retrieval for coding agents.</strong> Parse your codebase into a dependency graph, store it in Oracle PGQ, and inject dependency-aware context into Claude Code — so your agent finds the right files, faster.
+  <strong>Structure-aware retrieval for coding agents.</strong> Parse your codebase into a dependency graph, store it in Oracle AI Database 26ai Free PGQ, and inject dependency-aware context into <strong>pi</strong>, Claude Code, and Codex — so your agent finds the right files, faster.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12+" />
+  <img src="https://img.shields.io/badge/npm-ckg-CB3837?style=for-the-badge&logo=npm&logoColor=white" alt="npm: ckg" />
+  <img src="https://img.shields.io/badge/pi-Plugin-00D9FF?style=for-the-badge" alt="pi Plugin" />
   <img src="https://img.shields.io/badge/Oracle_AI_Database-26ai_Free-F80000?style=for-the-badge&logo=oracle&logoColor=white" alt="Oracle AI Database 26ai Free" />
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-6C47FF?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude Code Plugin" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache%202.0-blue.svg?style=for-the-badge" alt="License: MIT OR Apache-2.0" /></a>
@@ -78,7 +80,8 @@ The split: **Oracle PGQ finds the structural edges. Python's Personalized PageRa
 ## Quick Start
 
 <!-- one-command-install -->
-> **One-command install**: clone, configure, and run in a single step:
+> **One command, every agent**: clones CKG, installs the Python CLI, and
+> registers it with **pi**, **Claude Code**, and **Codex** automatically:
 >
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/jasperan/ckg/main/install.sh | bash
@@ -91,29 +94,67 @@ The split: **Oracle PGQ finds the structural edges. Python's Personalized PageRa
 > PROJECT_DIR=/opt/ckg curl -fsSL https://raw.githubusercontent.com/jasperan/ckg/main/install.sh | bash
 > ```
 >
-> Or install manually:
+> Register with specific agents only (`pi,claude,codex`):
 > ```bash
-> git clone https://github.com/jasperan/ckg.git
-> cd ckg
-> # See below for setup instructions
+> CKG_AGENTS=pi curl -fsSL https://raw.githubusercontent.com/jasperan/ckg/main/install.sh | bash
 > ```
 > </details>
 
 ### Prerequisites
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- [Oracle AI Database 26ai Free](https://www.oracle.com/database/free/) (optional — for PGQ graph queries)
+- Python 3.12+ and [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- [Oracle AI Database 26ai Free](https://www.oracle.com/database/free/) (optional — enables in-DB PGQ retrieval)
 
-### 1. Install
+### Install for pi (recommended)
 
 ```bash
-git clone https://github.com/jasperan/ckg.git
-cd ckg
-uv sync
+# One command — npm package (auto-installs the Python core):
+pi install npm:ckg
+
+# Or straight from GitHub (works right now, no npm needed):
+pi install git:github.com/jasperan/ckg
+
+# Or try it for one session without installing:
+pi -e git:github.com/jasperan/ckg
 ```
 
-### 2. Build a Graph
+CKG is a **pi package** ([pi.dev/packages](https://pi.dev/packages) catalog) and
+works as a **transparent plugin**: on every coding prompt it builds (or loads)
+ your codebase's dependency graph and injects a compact **structure map** into
+the system prompt — no user action, ever. It also registers six tools
+(`ckg_status`, `ckg_build`, `ckg_load`, `ckg_query`, `ckg_inject`,
+`ckg_oracle_status`) and a `/ckg` command. `pi install npm:ckg` runs a
+postinstall that sets up the Python CLI in a bundled venv, so there is nothing
+extra to configure.
+
+### Install for Claude Code
+
+```bash
+claude plugin marketplace add jasperan/ckg
+claude plugin install ckg
+```
+
+This installs a marketplace plugin with a `UserPromptSubmit` hook that injects
+the structure map on every prompt, plus six `/ckg-*` slash commands. (Or
+`claude plugins install ~/ckg/skills/ckg` for the skill-only variant.)
+
+### Install for Codex / OpenCode
+
+```bash
+mkdir -p ~/.config/opencode/skills && cp -r skills/ckg ~/.config/opencode/skills/
+```
+
+### Install the CLI only
+
+```bash
+# From this repo:
+git clone https://github.com/jasperan/ckg.git && cd ckg && uv sync
+
+# Or straight from git, anywhere:
+pip install git+https://github.com/jasperan/ckg.git
+```
+
+### 1. Build a Graph
 
 ```bash
 # From the root of any Python project:
@@ -125,7 +166,7 @@ ckg build . --pkg-root mypackage
 #   edges: 5201
 ```
 
-### 3. Query the Graph
+### 2. Query the Graph
 
 ```bash
 ckg query "add JWT authentication middleware"
@@ -139,7 +180,29 @@ ckg query "add JWT authentication middleware"
 #   ...
 ```
 
-### 4. Inject into Claude Code
+### 3. (Optional) Store in Oracle PGQ
+
+```bash
+# Start Oracle AI Database 26ai Free (one command):
+docker run -d --name ckg-oracle -p 1521:1521 \
+  -e ORACLE_PWD=continual_learning \
+  container-registry.oracle.com/database/free:latest
+
+export CKG_ORACLE_DSN=localhost:1521/FREEPDB1 \
+       CKG_ORACLE_USER=dmuser \
+       CKG_ORACLE_PASSWORD=continual_learning
+
+# Parse + store the graph into PGQ:
+ckg load . --pkg-root mypackage --domain myapp
+ckg oracle-status   # verify connectivity + stored graph
+```
+
+With `CKG_ORACLE_DSN` set, **every** `ckg query` / `ckg inject` (and the pi
+plugin's transparent injection) runs the neighborhood match via
+`GRAPH_TABLE ... MATCH` inside Oracle and only Personalized PageRank in
+Python. `ckg oracle-status` shows the retrieval mode at a glance.
+
+### 4. Inject into an agent
 
 ```bash
 ckg inject "fix the rate limiter bug"
@@ -159,16 +222,53 @@ ckg inject "fix the rate limiter bug"
 
 The output is a markdown blob ready to append to your agent's system prompt.
 
-## Claude Code Plugin
+## pi Plugin (detailed)
 
-CKG works as a **transparent Claude Code skill**. Install the repo, and Claude Code automatically injects structure maps on every prompt — no user action needed.
+CKG for pi is a **transparent background extension**: you install it once and
+never think about it again.
 
-```bash
-# Add to your Claude Code skills:
-claude plugins install ~/ckg/skills/ckg
-```
+**What it does on every coding prompt:**
 
-The skill hooks into the `before:prompt` lifecycle, detects the project root, loads or builds the code graph, runs hybrid retrieval against the current prompt, and injects a compact dependency map. The user never sees it — they just make fewer tool calls.
+1. Detects the project root (`.git` / `pyproject.toml` / `package.json`).
+2. Loads the cached code graph (`.ckg/code_graph.json`), building it once in
+the background if missing.
+3. Runs hybrid retrieval against your prompt — via **Oracle PGQ** when
+`CKG_ORACLE_DSN` is set, in-memory otherwise.
+4. Appends a compact structure map (anchor files + dependency reach) to the
+system prompt, behind the `before_agent_start` event.
+
+Keyword-gated (only coding prompts), time-boxed (never blocks the loop), and
+cached per session — the agent sees the map, the user sees nothing.
+
+**Tools the agent can call:**
+
+| Tool | Purpose |
+|------|---------|
+| `ckg_status` | CLI / project / cache / Oracle state |
+| `ckg_build` | Parse the tree once (`.ckg/code_graph.json`) |
+| `ckg_load` | Store the graph into Oracle PGQ |
+| `ckg_query` | Ranked hybrid retrieval for a task |
+| `ckg_inject` | Explicit structure map for a query |
+| `ckg_oracle_status` | Oracle connectivity + stored graph stats |
+
+`/ckg` shows the same status in the TUI. Disable transparent injection with
+`CKG_INJECT=0` or `.ckg/pi.json` (`{"inject": false}`).
+
+## Claude Code Plugin (detailed)
+
+CKG works as a **transparent Claude Code plugin**. Install the marketplace and
+Claude Code automatically injects structure maps on every prompt — no user
+action needed.
+
+- **Hook**: `UserPromptSubmit` runs `hooks/before_prompt.py` (8s timeout,
+  best-effort) which appends the structure map via
+  `hookSpecificOutput.additionalContext`.
+- **Commands**: `/ckg-status`, `/ckg-build`, `/ckg-load`, `/ckg-query`,
+  `/ckg-inject`, `/ckg-oracle-status`.
+- **Skill**: `skills/ckg/` activates on coding keywords and instructs the agent
+  to run `ckg build/inject` silently.
+
+The user never sees CKG — they just make fewer tool calls.
 
 ## Edge Types
 
@@ -246,21 +346,34 @@ ckg/
       builder.py          # Enrichment, CodeGraph dataclass, structure map rendering
     storage/
       oracle_pgq.py       # Oracle PGQ: CREATE PROPERTY GRAPH, MATCH, upsert
+      connection.py      # CKG_ORACLE_* env config, pool, oracle-summary
     retrieval/
       hybrid.py           # Lexical anchor → graph reach → PPR pipeline
       pagerank.py         # Personalized PageRank (pure NumPy)
     claude/
-      plugin.py           # Claude Code integration: detect, build, inject
+      plugin.py           # Agent integration: detect, build, inject
       prompts.py          # System prompt templates
     cli/
-      main.py             # CLI: build, query, inject
-  skills/ckg/
-    SKILL.md              # Claude Code skill definition
+      main.py             # CLI: build, load, query, inject, oracle-status
+  pi/
+    extensions/ckg/       # pi plugin: transparent injection, ckg_* tools, /ckg
+  skills/
+    ckg/                  # Claude Code / Codex skill definition
+    ckg-pi/               # pi-native skill (uses the ckg_* tools)
+  .claude-plugin/
+    plugin.json           # Claude Code plugin manifest (UserPromptSubmit hook)
+    marketplace.json      # Claude Code marketplace
+  hooks/
+    before_prompt.py      # Claude Code UserPromptSubmit hook
+  commands/               # Claude Code /ckg-* slash commands
+  scripts/
+    postinstall.js        # npm postinstall: bundles the Python venv
   configs/
     default.yaml          # Default configuration
-  tests/                  # Test suite
+  tests/                  # Test suite (incl. live Oracle tests, CKG_ORACLE_LIVE=1)
+  package.json            # npm / pi-package manifest
   pyproject.toml
-  install.sh
+  install.sh              # One-command installer (pi + Claude Code + Codex)
 ```
 
 ## Sister Projects
