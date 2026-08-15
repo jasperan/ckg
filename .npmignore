@@ -1,0 +1,20 @@
+# Keep the published npm package clean — the `files` whitelist in package.json
+# controls what ships; this blocks build/venv/pytest artifacts that would
+# otherwise leak in via `src/`.
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+.omx/
+.omc/
+.omo/
+.ckg/
+tests/
+docs/
+.github/
+node_modules/
+*.tgz

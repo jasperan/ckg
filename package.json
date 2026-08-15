@@ -39,7 +39,10 @@
     "uv.lock",
     "README.md",
     "LICENSE",
-    "install.sh"
+    "install.sh",
+    "!**/__pycache__/**",
+    "!**/*.py[cod]",
+    "!**/*.egg-info/**"
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.js"

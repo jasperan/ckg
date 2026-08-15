@@ -1,0 +1,17 @@
+{
+  "active": true,
+  "current_phase": "ralph",
+  "iteration": 1,
+  "review_cycle": 0,
+  "phase_cycle": [
+    "ralplan",
+    "ralph",
+    "code-review"
+  ],
+  "handoff_artifacts": {
+    "ralplan": ".omx/context/ckg-fresh-install-plan.md"
+  },
+  "review_verdict": null,
+  "return_to_ralplan_reason": null,
+  "run_outcome": "continue"
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "active": true,
+  "skill": "autopilot",
+  "keyword": "",
+  "phase": "ralph",
+  "activated_at": "2026-08-15T09:27:57.482Z",
+  "updated_at": "2026-08-15T09:28:12.440Z",
+  "source": "state-operations",
+  "active_skills": [
+    {
+      "skill": "autopilot",
+      "phase": "ralph",
+      "active": true,
+      "activated_at": "2026-08-15T09:27:57.482Z",
+      "updated_at": "2026-08-15T09:28:12.440Z"
+    }
+  ]
+}
