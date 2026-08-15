@@ -1,0 +1,43 @@
+# CKG — Code Knowledge Graph
+#
+# Default configuration. All paths are relative to the project root.
+# Environment variables (CKG_*) override these values.
+
+# --- Graph building -----------------------------------------------------------
+
+# Top-level package name for the parsed tree.
+# Default: auto-detected from the directory name.
+pkg_root: ""
+
+# Output directory for cached graph data.
+cache_dir: ".ckg"
+
+# --- Retrieval ----------------------------------------------------------------
+
+# Maximum lexical anchor seeds.
+k_anchor: 5
+
+# Graph reach depth (number of hops from anchors).
+hops: 2
+
+# Maximum results returned by hybrid retrieval.
+top_k: 10
+
+# --- Oracle PGQ (optional) ----------------------------------------------------
+
+# Domain name for PGQ graph scoping.
+domain: "default"
+
+# Property graph name in Oracle.
+graph_name: "ckg_code_graph"
+
+# Table prefix for graph nodes/edges in Oracle.
+table_prefix: "MEMORY_GRAPH"
+
+# --- Claude Code integration --------------------------------------------------
+
+# Auto-detect project root on session start (walk up for .git/pyproject.toml).
+auto_detect: true
+
+# Maximum files shown in the structure map.
+max_structure_map_files: 15
