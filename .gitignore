@@ -29,3 +29,6 @@ ckg_data/
 
 # CKG caches
 .ckg/
+
+# OMX state
+.omx/
