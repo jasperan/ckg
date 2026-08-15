@@ -8,7 +8,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12+" />
-  <img src="https://img.shields.io/badge/npm-ckg-CB3837?style=for-the-badge&logo=npm&logoColor=white" alt="npm: ckg" />
+  <img src="https://img.shields.io/badge/npm-@jasperan/ckg-CB3837?style=for-the-badge&logo=npm&logoColor=white" alt="npm: @jasperan/ckg" />
   <img src="https://img.shields.io/badge/pi-Plugin-00D9FF?style=for-the-badge" alt="pi Plugin" />
   <img src="https://img.shields.io/badge/Oracle_AI_Database-26ai_Free-F80000?style=for-the-badge&logo=oracle&logoColor=white" alt="Oracle AI Database 26ai Free" />
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-6C47FF?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude Code Plugin" />
@@ -109,7 +109,7 @@ The split: **Oracle PGQ finds the structural edges. Python's Personalized PageRa
 
 ```bash
 # One command — npm package (auto-installs the Python core):
-pi install npm:ckg
+pi install npm:@jasperan/ckg
 
 # Or straight from GitHub (works right now, no npm needed):
 pi install git:github.com/jasperan/ckg
@@ -123,7 +123,7 @@ works as a **transparent plugin**: on every coding prompt it builds (or loads)
  your codebase's dependency graph and injects a compact **structure map** into
 the system prompt — no user action, ever. It also registers six tools
 (`ckg_status`, `ckg_build`, `ckg_load`, `ckg_query`, `ckg_inject`,
-`ckg_oracle_status`) and a `/ckg` command. `pi install npm:ckg` runs a
+`ckg_oracle_status`) and a `/ckg` command. `pi install npm:@jasperan/ckg` runs a
 postinstall that sets up the Python CLI in a bundled venv, so there is nothing
 extra to configure.
 
