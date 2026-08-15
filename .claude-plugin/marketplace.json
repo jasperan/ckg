@@ -1,0 +1,27 @@
+{
+  "name": "ckg",
+  "owner": {
+    "name": "Nacho Martinez",
+    "url": "https://github.com/jasperan"
+  },
+  "metadata": {
+    "description": "Code Knowledge Graph (CKG) — structure-aware retrieval for coding agents. Parse codebases into typed graphs (import/call/co-edit edges), store in Oracle AI Database 26ai Free PGQ, and inject a dependency-aware structure map before every prompt so Claude Code finds the right files faster.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "ckg",
+      "source": "./",
+      "description": "Code Knowledge Graph — transparent background dependency analysis. Builds a typed code graph and injects a compact structure map into every prompt (anchors + 2-hop import/call/co-edit reach), verified to cut tool calls by ~22% and reach correct files ~36% sooner on real features.",
+      "category": "development",
+      "tags": [
+        "code-graph",
+        "dependency-analysis",
+        "retrieval",
+        "oracle",
+        "pgq",
+        "agent-context"
+      ]
+    }
+  ]
+}

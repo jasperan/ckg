@@ -1,0 +1,45 @@
+{
+  "name": "ckg",
+  "description": "Code Knowledge Graph (CKG) — transparent background dependency analysis for Claude Code. Parses codebases into typed graphs (imports, calls, co-edits), stores them in Oracle AI Database 26ai Free PGQ, and injects a structure map before every prompt so the agent finds the right files faster.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Nacho Martinez",
+    "url": "https://github.com/jasperan"
+  },
+  "repository": "https://github.com/jasperan/ckg",
+  "homepage": "https://github.com/jasperan/ckg",
+  "license": "MIT",
+  "keywords": [
+    "code-graph",
+    "dependency-analysis",
+    "retrieval",
+    "oracle",
+    "pgq",
+    "agent-context",
+    "graphrag"
+  ],
+  "hooks": {
+    "BeforePrompt": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/before_prompt.py"
+          }
+        ]
+      }
+    ]
+  },
+  "commands": [
+    "./commands/ckg-status.md",
+    "./commands/ckg-build.md",
+    "./commands/ckg-load.md",
+    "./commands/ckg-query.md",
+    "./commands/ckg-inject.md",
+    "./commands/ckg-oracle-status.md"
+  ],
+  "skills": [
+    "./skills"
+  ]
+}

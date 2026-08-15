@@ -92,9 +92,12 @@ def build_context_map(
     from ckg.graph.builder import CodeGraph
     cg = CodeGraph.from_dict(graph)
 
-    # Extract anchors as file IDs
-    anchors = [r["node_id"] for r in results["results"]
-               if r["node_id"].startswith("file:")][:5]
+    # Extract anchors as file IDs — prefer the lexical seed anchors, which are
+    # the actual entry points (they may rank below symbols in the PPR results).
+    anchors = [a for a in results.get("anchors", []) if a.startswith("file:")][:5]
+    if not anchors:
+        anchors = [r["node_id"] for r in results["results"]
+                   if r["node_id"].startswith("file:")][:5]
     if not anchors and results["results"]:
         anchors = [results["results"][0]["node_id"]]
 

@@ -26,3 +26,6 @@ ckg_data/
 
 # CodeGraph
 .codegraph/
+
+# CKG caches
+.ckg/

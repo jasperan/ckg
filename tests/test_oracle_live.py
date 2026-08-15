@@ -257,6 +257,56 @@ class TestFullPipeline:
 
 
 @_LIVE
+class TestCliOracle:
+    """CLI Oracle integration: ckg load + PGQ auto-detection."""
+
+    def test_oracle_status_configured(self, pool):
+        from ckg.cli.main import cmd_oracle_status
+        import argparse
+
+        ns = argparse.Namespace()
+        rc = cmd_oracle_status(ns)
+        assert rc in (0, 1)  # live DB may or may not be reachable from CLI
+
+    def test_cli_load_and_pgq_query(self, pool, sample_pkg_path, tmp_path, capsys):
+        """ckg load stores into Oracle; ckg query then uses the PGQ method."""
+        import argparse
+        import os
+        from ckg.cli.main import cmd_load, cmd_query
+
+        os.environ["CKG_ORACLE_DSN"] = DSN
+        os.environ["CKG_ORACLE_USER"] = USER
+        os.environ["CKG_ORACLE_PASSWORD"] = PASSWORD
+        os.environ["CKG_ORACLE_DOMAIN"] = f"{TEST_DOMAIN}_cli"
+        try:
+            out_graph = tmp_path / "code_graph.json"
+            ns_load = argparse.Namespace(
+                path=str(sample_pkg_path),
+                pkg_root="sample_pkg",
+                graph=str(out_graph),
+                domain=f"{TEST_DOMAIN}_cli",
+            )
+            rc = cmd_load(ns_load)
+            assert rc == 0
+            assert out_graph.exists()
+
+            capsys.readouterr()
+            ns_query = argparse.Namespace(
+                query="connect to the database",
+                graph=str(out_graph),
+                k_anchor=5, hops=2, top_k=5,
+                no_pgq=False,
+            )
+            rc = cmd_query(ns_query)
+            assert rc == 0
+            captured = capsys.readouterr().out
+            assert "pgq" in captured.lower(), f"expected PGQ method, got:\n{captured}"
+        finally:
+            for var in ("CKG_ORACLE_DSN", "CKG_ORACLE_USER", "CKG_ORACLE_PASSWORD", "CKG_ORACLE_DOMAIN"):
+                os.environ.pop(var, None)
+
+
+@_LIVE
 class TestExistingGraphData:
     """Verify the dl-ai-continual-learning graph data is queryable."""
 
