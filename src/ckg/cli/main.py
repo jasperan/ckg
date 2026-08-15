@@ -79,14 +79,20 @@ def cmd_load(args: argparse.Namespace) -> int:
     if args.domain:
         cfg["domain"] = args.domain
 
-    mem, cfg = connect_pgq(cfg)
-    if mem is None:
-        print(f"error: cannot connect to Oracle at {cfg['dsn']}", file=sys.stderr)
-        return 1
-
     tree = Path(args.path).resolve()
     if not tree.is_dir():
         print(f"error: {tree} is not a directory", file=sys.stderr)
+        return 1
+
+    # Connect only after validating inputs so errors are meaningful.
+    from ckg.storage.connection import redact_dsn
+    mem, cfg = connect_pgq(cfg)
+    if mem is None:
+        print(
+            f"error: cannot connect to Oracle at {redact_dsn(cfg['dsn'])} — "
+            "check CKG_ORACLE_DSN/USER/PASSWORD and that the container is up",
+            file=sys.stderr,
+        )
         return 1
 
     pkg_root = args.pkg_root or tree.name
@@ -114,7 +120,7 @@ def cmd_load(args: argparse.Namespace) -> int:
         table_prefix=cfg["table_prefix"],
     )
 
-    print(f"Stored into Oracle PGQ ({cfg['dsn']}, domain={domain}):")
+    print(f"Stored into Oracle PGQ ({redact_dsn(cfg['dsn'])}, domain={domain}):")
     print(f"  {n} nodes, {e} edges → {cfg['graph_name']}")
     print(f"  graph cache → {graph_path}")
     return 0
@@ -127,7 +133,7 @@ def cmd_oracle_status(args: argparse.Namespace) -> int:
     summary = oracle_summary()
     if not summary["configured"]:
         print(f"Oracle PGQ: not configured — {summary['reason']}")
-        print("Set CKG_ORACLE_DSN=CKG_ORACLE_USER/PASSWORD to enable.")
+        print("Set CKG_ORACLE_DSN (e.g. localhost:1521/FREEPDB1) to enable.")
         return 0
     print(f"Oracle PGQ: configured  → {summary['dsn']} (domain={summary['domain']})")
     if not summary["connected"]:

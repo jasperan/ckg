@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export type CliCommand = "build" | "query" | "inject" | "status";
+export type CliCommand = "build" | "load" | "query" | "inject" | "oracle-status";
 
 export interface CliSpec {
   /** Executable (absolute path) or bare command name. */
@@ -74,25 +74,7 @@ export function discoverCli(): CliSpec | null {
     return { bin: bundled, prefix: [], cwd: packageRoot(), source: "bundled venv" };
   }
 
-  // 3) `uv run ckg` from the package dir (dev checkout without .venv yet)
-  const uvBins = ["uv", "uv.exe", "uv.cmd"];
-  for (const uv of uvBins) {
-    try {
-      const r = execFileSyncOrNull(uv, ["--version"], packageRoot());
-      if (r !== null) {
-        return {
-          bin: uv,
-          prefix: ["run", "--no-project", "ckg"],
-          cwd: packageRoot(),
-          source: "uv run (bundled)",
-        };
-      }
-    } catch {
-      /* keep scanning */
-    }
-  }
-
-  // 4) On PATH
+  // 3) On PATH (probing with --help so a broken/absent install is skipped)
   for (const candidate of ["ckg", "ckg.cmd", "ckg.exe"]) {
     try {
       const r = execFileSyncOrNull(candidate, ["--help"], process.cwd());
@@ -155,8 +137,7 @@ export function installGuidance(): string {
   return [
     "CKG requires the Python CLI (`ckg`). Install it with one of:",
     "",
-    `  pip install ckg          # from PyPI`,
-    `  uv tool install ckg      # or with uv`,
+    `  pip install git+${repo}.git   # from GitHub (PyPI publication pending)`,
     `  git clone ${repo} && cd ckg && uv sync`,
     "",
     "Or set CKG_CLI=/path/to/ckg to point at an existing install.",

@@ -39,10 +39,12 @@ export default function (pi: ExtensionAPI) {
   // ── Transparent injection ─────────────────────────────────────────────────
   pi.on("before_agent_start", async (event, ctx) => {
     if (!event.prompt) return;
+    // Skip before doing any work when a map is already present (avoids paying
+    // the inject subprocess cost on every prompt and pinning a stale map).
+    if (event.systemPrompt.includes("CKG Structure Map")) return;
     const map = await buildMap(pi, state, event.prompt, ctx.cwd);
     if (!map) return;
     const suffix = `\n\n${map}`;
-    if (event.systemPrompt.includes("CKG Structure Map")) return; // already present
     return { systemPrompt: event.systemPrompt + suffix };
   });
 

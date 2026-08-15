@@ -23,13 +23,11 @@ import { loadSettings, type CkgSettings } from "./config";
 export interface CkgSessionState {
   /** Projects whose background build was already started this session. */
   buildsStarted: Set<string>;
-  /** Projects whose graph was already verified present this session. */
-  graphChecked: Set<string>;
   cli: CliSpec | null;
 }
 
 export function newSessionState(): CkgSessionState {
-  return { buildsStarted: new Set(), graphChecked: new Set(), cli: null };
+  return { buildsStarted: new Set(), cli: null };
 }
 
 const PREAMBLE = `## Code Knowledge Graph (CKG) — Structure-Aware Context
@@ -75,7 +73,6 @@ export async function buildMap(
       return null;
     }
 
-    state.graphChecked.add(project.root);
     const result = await runCli(
       cli,
       ["inject", prompt, "--root", project.root],
@@ -121,7 +118,8 @@ export async function statusBlock(state: CkgSessionState, cwd: string): Promise<
     lines.push("Oracle PGQ:");
     for (const l of head) lines.push(`  ${l.trim()}`);
   } else {
-    lines.push(`Oracle PGQ:      not configured / unreachable (${oracle.stderr.split("\n")[0]?.trim() || "in-memory mode"})`);
+    const msg = (oracle.stdout || oracle.stderr).split("\n")[0]?.trim() || "in-memory mode";
+    lines.push(`Oracle PGQ:      ${msg}`);
   }
 
   lines.push("");

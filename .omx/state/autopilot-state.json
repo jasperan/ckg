@@ -1,6 +1,6 @@
 {
   "active": true,
-  "current_phase": "ralph",
+  "current_phase": "code-review",
   "iteration": 1,
   "review_cycle": 0,
   "phase_cycle": [
@@ -9,7 +9,7 @@
     "code-review"
   ],
   "handoff_artifacts": {
-    "ralplan": ".omx/context/ckg-fresh-install-plan.md"
+    "ralph": "commits ccbe6c4, dccf4b5, 1571bd6 (61 tests pass, all install paths verified)"
   },
   "review_verdict": null,
   "return_to_ralplan_reason": null,

@@ -1,0 +1,183 @@
+{
+  "runId": "76dcda59",
+  "agent": "reviewer",
+  "task": "[prompt redacted]",
+  "exitCode": 0,
+  "usage": {
+    "input": 46111,
+    "output": 28085,
+    "cacheRead": 513408,
+    "cacheWrite": 0,
+    "cost": 0.0078784412,
+    "turns": 19
+  },
+  "model": "opencode-go/deepseek-v4-flash:high",
+  "attemptedModels": [
+    "opencode-go/deepseek-v4-flash:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "opencode-go/deepseek-v4-flash:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 46111,
+        "output": 28085,
+        "cacheRead": 513408,
+        "cacheWrite": 0,
+        "cost": 0.0078784412,
+        "turns": 19
+      }
+    }
+  ],
+  "durationMs": 248705,
+  "toolCount": 48,
+  "launchContractDigest": "800fb5ecc18743ba9a9300ddedc4860f119924a4c28237ad52ad60558f7f3b7b",
+  "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+      "sha256:caccf83eebd3adb0"
+    ],
+    "configured": [],
+    "effective": [
+      "sha256:caccf83eebd3adb0"
+    ],
+    "omitted": {
+      "runtime": 0,
+      "configured": 0,
+      "effective": 0
+    }
+  },
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "Reviewed every file listed in the task by reading them in full (main.py, connection.py, hybrid.py, pi/extensions/ckg/*.ts, scripts/postinstall.js, hooks/before_prompt.py, .claude-plugin/plugin.json, marketplace.json, package.json, install.sh) plus supporting modules (oracle_pgq.py, pagerank.py, claude/plugin.py, prompts.py) and tests (test_cli.py, test_retrieval.py, test_oracle_live.py). Produced 6 MEDIUM and 7 LOW severity findings with file:line references and concrete fixes; no CRITICAL/HIGH."
+        }
+      ],
+      "changedFiles": [
+        "src/ckg/cli/main.py",
+        "src/ckg/storage/connection.py",
+        "src/ckg/retrieval/hybrid.py",
+        "pi/extensions/ckg/index.ts",
+        "pi/extensions/ckg/cli.ts",
+        "pi/extensions/ckg/context.ts",
+        "pi/extensions/ckg/config.ts",
+        "pi/extensions/ckg/project.ts",
+        "scripts/postinstall.js",
+        "hooks/before_prompt.py",
+        ".claude-plugin/plugin.json",
+        ".claude-plugin/marketplace.json",
+        "package.json",
+        "install.sh"
+      ],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "git diff ccbe6c4^..HEAD --stat",
+          "result": "not-run",
+          "summary": "Review subagent cannot run shell commands; all listed files were read in full instead"
+        },
+        {
+          "command": "pytest tests/ -q",
+          "result": "not-run",
+          "summary": "Recommended for parent: confirms test_cli/test_retrieval pass; oracle live tests need CKG_ORACLE_LIVE=1"
+        },
+        {
+          "command": "npm pack --dry-run",
+          "result": "not-run",
+          "summary": "Recommended for parent: verifies published tarball contents match files whitelist"
+        },
+        {
+          "command": "uv run --no-project ckg --help",
+          "result": "not-run",
+          "summary": "Recommended for parent: validates MEDIUM-1 (whether the uv discovery probe actually resolves ckg)"
+        }
+      ],
+      "validationOutput": [
+        "Static review only. Verified: no shell interpolation in any subprocess call (execFile/spawnSync/subprocess.run all use argv arrays); SQL values bind-parameterized; hooks never throw; postinstall non-fatal; .npmignore/files consistent. See findings for 6 MEDIUM + 7 LOW issues."
+      ],
+      "residualRisks": [
+        "Cannot run git diff/pytest/tsc from this review-only subagent; parent should run the listed commands",
+        "typebox peerDependency resolvability in the pi runtime unverifiable offline (package.json:59)",
+        "README/marketplace metric claims (22%/36%) not verifiable from repo",
+        "uv 'run --no-project' PATH-fallback behavior assumed per MEDIUM-1; should be confirmed with the probe command",
+        "Windows path handling (project.ts:46, cli.ts:82) untested on Windows"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "Adds ckg load + oracle-status CLI commands with Oracle PGQ auto-detection, a connection module (env config + oracledb pool + oracle_summary), a PGQ fallback message in hybrid retrieval, a 6-tool pi extension with transparent prompt injection, a Claude Code UserPromptSubmit hook, postinstall venv bootstrap, plugin/marketplace manifests, npm manifest, and an agent-install script",
+      "reviewFindings": [
+        "medium: pi/extensions/ckg/cli.ts:82-90 - uv-run CliSpec selected without validating ckg runs; shadows working PATH install; probe `uv run --no-project ckg --help` or reorder",
+        "medium: pi/extensions/ckg/index.ts:42-46 - CKG Structure Map guard runs after buildMap(); wasted subprocess per prompt and stale map pinned; check marker first or replace map",
+        "medium: hooks/before_prompt.py + .claude-plugin/plugin.json - UserPromptSubmit hook runs ckg inject on every prompt, no keyword gate or CKG_INJECT toggle (pi extension has both)",
+        "medium: src/ckg/storage/connection.py:37 - hardcoded default password (continual_learning) silently used whenever CKG_ORACLE_DSN set; warn/require explicit password for non-local targets",
+        "medium: src/ckg/storage/connection.py:92 + src/ckg/cli/main.py:84,132 - DSN echoed to stdout; user:pass@host DSN form leaks credentials; redact userinfo",
+        "medium: src/ckg/storage/connection.py:104-105 - oracle_summary returns without pool.close() on connection-failure path; leak in long-lived processes",
+        "low: src/ckg/storage/connection.py:41-42 - int() on env vars can raise ValueError outside try, crashing oracle-status",
+        "low: src/ckg/cli/main.py:82-84 - load connects to Oracle before validating path, hides real connection error, leaks pool on error path",
+        "low: src/ckg/cli/main.py:164 - explicit 0 for k-anchor/hops/top-k silently becomes default",
+        "low: hybrid.py:70 + context.ts:27,78 + cli.ts:29 - dead code: unused match_edges import, write-only graphChecked set, CliCommand 'status' not a real subcommand",
+        "low: project.ts:46 + cli.ts:82 + context.ts projectName - Windows paths broken (backslash handling, .venv/Scripts path)",
+        "low: main.py:130 + cli.ts:158 - doc bugs: nonsense CKG_ORACLE_DSN=CKG_ORACLE_USER/PASSWORD hint; unverified 'pip install ckg' PyPI claim",
+        "low: package.json:59 + cli.ts:38-51 + tests/test_cli.py:139-146 - typebox peer unresolvable offline, packageRoot breaks in install.sh fallback copy mode, argparse import hack"
+      ],
+      "manualNotes": "Recommendation: REQUEST CHANGES. Fix MEDIUM-1..MEDIUM-6 first (all small, localized). No CRITICAL/HIGH found. Review-only pass - no files modified or staged."
+    }
+  },
+  "effects": {
+    "fileMutation": {
+      "status": "not-applicable",
+      "expected": false,
+      "attempted": false
+    }
+  },
+  "transcriptPath": "/home/ubuntu/personal/ckg/.pi/subagents/artifacts/76dcda59_reviewer_0_transcript.jsonl",
+  "timestamp": 1786786670227
+}

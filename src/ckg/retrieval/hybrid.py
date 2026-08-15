@@ -67,7 +67,7 @@ def hybrid_retrieve(
     if mem is not None and domain is not None:
         # PGQ path — match neighborhood in the database
         try:
-            from ckg.storage.oracle_pgq import match_edges, match_neighborhood
+            from ckg.storage.oracle_pgq import match_neighborhood
             neighbors: set[str] = set(anchors)
             for anchor in anchors:
                 matched = match_neighborhood(

@@ -3,6 +3,7 @@
 Tests the CLI through its Python API (not subprocess) for determinism.
 """
 
+import argparse
 import json
 import pytest
 import tempfile
@@ -54,13 +55,12 @@ class TestCliQuery:
     def test_query_against_cache(self, sample_pkg_path, tmp_path):
         # Build first
         output = tmp_path / "graph.json"
-        import argparse as _argparse
-        build_ns = _argparse.Namespace(path=str(sample_pkg_path), pkg_root="sample_pkg",
-                                        output=str(output))
+        build_ns = argparse.Namespace(path=str(sample_pkg_path), pkg_root="sample_pkg",
+                                      output=str(output))
         cmd_build(build_ns)
 
         # Query
-        query_ns = _argparse.Namespace(
+        query_ns = argparse.Namespace(
             query="validate email processing",
             graph=str(output),
             k_anchor=3,
@@ -71,8 +71,7 @@ class TestCliQuery:
         assert rc == 0
 
     def test_query_missing_graph(self, tmp_path):
-        import argparse as _argparse
-        ns = _argparse.Namespace(
+        ns = argparse.Namespace(
             query="anything",
             graph=str(tmp_path / "nonexistent.json"),
             k_anchor=3,
@@ -88,8 +87,8 @@ class TestCliInject:
         # Build first so the cache exists
         cache_dir = tmp_path / ".ckg"
         output = cache_dir / "code_graph.json"
-        import argparse as _argparse
-        build_ns = _argparse.Namespace(path=str(sample_pkg_path), pkg_root="sample_pkg",
+        
+        build_ns = argparse.Namespace(path=str(sample_pkg_path), pkg_root="sample_pkg",
                                         output=str(output))
         cmd_build(build_ns)
 
@@ -108,11 +107,3 @@ class TestCliInject:
         result = inject_context("anything", project_root=Path("/nonexistent"))
         assert result == ""
 
-
-import argparse as _argparse_module
-# This is needed for argparse.Namespace to be importable
-# (it's used in the test files via the import at top level)
-try:
-    import argparse
-except ImportError:
-    pass

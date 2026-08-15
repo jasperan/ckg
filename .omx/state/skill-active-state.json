@@ -3,17 +3,17 @@
   "active": true,
   "skill": "autopilot",
   "keyword": "",
-  "phase": "ralph",
+  "phase": "code-review",
   "activated_at": "2026-08-15T09:27:57.482Z",
-  "updated_at": "2026-08-15T09:28:12.440Z",
+  "updated_at": "2026-08-15T09:33:30.757Z",
   "source": "state-operations",
   "active_skills": [
     {
       "skill": "autopilot",
-      "phase": "ralph",
+      "phase": "code-review",
       "active": true,
       "activated_at": "2026-08-15T09:27:57.482Z",
-      "updated_at": "2026-08-15T09:28:12.440Z"
+      "updated_at": "2026-08-15T09:33:30.757Z"
     }
   ]
 }

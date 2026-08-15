@@ -4,14 +4,13 @@ version = "0.1.0"
 description = "Code Knowledge Graph (CKG) — structure-aware retrieval for coding agents. Parse codebases into typed graphs, store in Oracle PGQ, and inject dependency-aware context into Claude Code / coding agents for faster, more accurate feature implementation."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT OR Apache-2.0" }
+license = { text = "MIT" }
 authors = [{ name = "Nacho Martinez", email = "jasperan@users.noreply.github.com" }]
 keywords = ["code-graph", "retrieval", "claude-code", "oracle-database", "pgq", "agent-context"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]

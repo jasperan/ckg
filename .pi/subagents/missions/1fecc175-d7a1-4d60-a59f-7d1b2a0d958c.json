@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "1fecc175-d7a1-4d60-a59f-7d1b2a0d958c",
+  "title": "[prompt redacted]",
+  "objective": "[prompt redacted]",
+  "status": "completed",
+  "createdAt": "2026-08-15T09:33:48.889Z",
+  "updatedAt": "2026-08-15T09:37:54.483Z",
+  "runs": [
+    {
+      "runId": "abe9f1f0-f065-4120-a217-ea65534fc9d1",
+      "mode": "workflow",
+      "asyncDir": "/tmp/pi-subagents-uid-1001/async-subagent-runs/abe9f1f0-f065-4120-a217-ea65534fc9d1",
+      "status": "complete",
+      "startedAt": "2026-08-15T09:33:48.890Z",
+      "completedAt": "2026-08-15T09:37:54.482Z"
+    }
+  ],
+  "workflowChildren": [
+    {
+      "workflowRunId": "abe9f1f0-f065-4120-a217-ea65534fc9d1",
+      "key": "arch",
+      "status": "completed",
+      "startedAt": "2026-08-15T09:33:48.955Z",
+      "updatedAt": "2026-08-15T09:37:54.418Z",
+      "artifactPaths": [
+        "/home/ubuntu/.pi/agent/sessions/--home-ubuntu-personal-ckg--/2026-08-15T09-13-04-583Z_01a004b2-3b47-7384-86b7-f78e220df0d8/ebb0b18c/run-0/session.jsonl"
+      ],
+      "runId": "ebb0b18c",
+      "agent": "reviewer",
+      "completedAt": "2026-08-15T09:37:54.418Z",
+      "sessionPath": "/home/ubuntu/.pi/agent/sessions/--home-ubuntu-personal-ckg--/2026-08-15T09-13-04-583Z_01a004b2-3b47-7384-86b7-f78e220df0d8/ebb0b18c/run-0/session.jsonl",
+      "heartbeat": {
+        "updatedAt": "2026-08-15T09:37:54.418Z",
+        "status": "completed"
+      }
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "status",
+      "path": "/tmp/pi-subagents-uid-1001/async-subagent-runs/abe9f1f0-f065-4120-a217-ea65534fc9d1/status.json"
+    },
+    {
+      "kind": "other",
+      "path": "/tmp/pi-subagents-uid-1001/async-subagent-runs/abe9f1f0-f065-4120-a217-ea65534fc9d1/events.jsonl",
+      "description": "Lifecycle events"
+    },
+    {
+      "kind": "output",
+      "path": "/home/ubuntu/.pi/agent/sessions/--home-ubuntu-personal-ckg--/2026-08-15T09-13-04-583Z_01a004b2-3b47-7384-86b7-f78e220df0d8/ebb0b18c/run-0/session.jsonl"
+    }
+  ],
+  "receipts": [],
+  "cwd": "/home/ubuntu/personal/ckg",
+  "ownerSessionId": "/home/ubuntu/.pi/agent/sessions/--home-ubuntu-personal-ckg--/2026-08-15T09-13-04-583Z_01a004b2-3b47-7384-86b7-f78e220df0d8.jsonl",
+  "summary": "Workflow completed with 1 child run(s). Return: I've completed a full read of the architecture: the pi extension (`pi/extensions/ckg/*.ts`), the Python core (`src/ckg/**`), the Claude Code plugin (`.claude-plugin/`, `hooks/before_prompt.py`), the npm/pyproject packaging, `install.sh`, `scripts/postinstall.js`, skills, README, and CI. I could not run `git diff` (no shell); I verified commit scope from `.git/logs/refs/heads/main` (ccbe6c4 = feat commit, dccf4b5 = docs/install, 1571bd6 = tarball/fallback-message fix, base = c56f2ef initial hygiene) and reviewed the working tree they produced.\n\n## Review\n\n**Correct — what is sound:**\n- The Python-core + TS-shell split is a legitimate v0.1 pattern: one algorithm implementation reused by CLI, Claude hook, and pi extension; per-process isolation means a crash or timeout never corrupts the agent loop. The fail-open discipline (`never throws`, short timeouts, `{}` on failure) is consistently applied across all three surfaces (`index.ts:55-58`, `before_prompt.py:69-100`, `runCli` in `cli.ts:1 Trace: 2 event(s)."
+}

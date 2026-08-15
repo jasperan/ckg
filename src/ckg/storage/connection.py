@@ -18,9 +18,21 @@ Environment variables:
 from __future__ import annotations
 
 import os
+import re
+import sys
 from types import SimpleNamespace
 
 from ckg.storage.oracle_pgq import DEFAULT_GRAPH_NAME
+
+_DEFAULT_PASSWORD = "continual_learning"
+
+
+def _safe_int(name: str, default: int) -> int:
+    """Parse an int env var without crashing on garbage input."""
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def oracle_config() -> dict | None:
@@ -31,16 +43,33 @@ def oracle_config() -> dict | None:
     dsn = os.environ.get("CKG_ORACLE_DSN")
     if not dsn:
         return None
+    password = os.environ.get("CKG_ORACLE_PASSWORD", _DEFAULT_PASSWORD)
+    # Warn when falling back to the well-known demo password outside localhost.
+    if (
+        password == _DEFAULT_PASSWORD
+        and "CKG_ORACLE_PASSWORD" not in os.environ
+        and not re.search(r"(localhost|127\.0\.0\.1|::1)", dsn)
+    ):
+        print(
+            "warning: using default CKG_ORACLE_PASSWORD against a non-local DSN — "
+            "set CKG_ORACLE_PASSWORD explicitly",
+            file=sys.stderr,
+        )
     return {
         "dsn": dsn,
         "user": os.environ.get("CKG_ORACLE_USER", "dmuser"),
-        "password": os.environ.get("CKG_ORACLE_PASSWORD", "continual_learning"),
+        "password": password,
         "domain": os.environ.get("CKG_ORACLE_DOMAIN", "default"),
         "graph_name": os.environ.get("CKG_ORACLE_GRAPH", DEFAULT_GRAPH_NAME),
         "table_prefix": os.environ.get("CKG_ORACLE_TABLE_PREFIX", "MEMORY_GRAPH"),
-        "pool_min": int(os.environ.get("CKG_ORACLE_POOL_MIN", "1")),
-        "pool_max": int(os.environ.get("CKG_ORACLE_POOL_MAX", "4")),
+        "pool_min": _safe_int("CKG_ORACLE_POOL_MIN", 1),
+        "pool_max": _safe_int("CKG_ORACLE_POOL_MAX", 4),
     }
+
+
+def redact_dsn(dsn: str) -> str:
+    """Strip any userinfo (user[:pass]@) from a DSN for safe display."""
+    return re.sub(r"[^/@]+@", "***@", dsn)
 
 
 def create_pool(cfg: dict):
@@ -89,8 +118,9 @@ def oracle_summary() -> dict:
     if cfg is None:
         return {"configured": False, "reason": "CKG_ORACLE_DSN not set (in-memory mode)"}
 
-    summary: dict = {"configured": True, "dsn": cfg["dsn"], "domain": cfg["domain"]}
+    summary: dict = {"configured": True, "dsn": redact_dsn(cfg["dsn"]), "domain": cfg["domain"]}
     mem = None
+    pool = None
     try:
         pool = create_pool(cfg)
         mem = pgq_mem(pool)
@@ -102,6 +132,11 @@ def oracle_summary() -> dict:
     except Exception as exc:  # pragma: no cover - depends on live DB
         summary["connected"] = False
         summary["error"] = str(exc).splitlines()[0][:200]
+        if pool is not None:
+            try:
+                pool.close()
+            except Exception:
+                pass
         return summary
 
     try:

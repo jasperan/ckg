@@ -1,0 +1,164 @@
+{
+  "runId": "ebb0b18c",
+  "agent": "reviewer",
+  "task": "[prompt redacted]",
+  "exitCode": 0,
+  "usage": {
+    "input": 47445,
+    "output": 25612,
+    "cacheRead": 562816,
+    "cacheWrite": 0,
+    "cost": 0.007694772400000002,
+    "turns": 23
+  },
+  "model": "opencode-go/deepseek-v4-flash:high",
+  "attemptedModels": [
+    "opencode-go/deepseek-v4-flash:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "opencode-go/deepseek-v4-flash:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 47445,
+        "output": 25612,
+        "cacheRead": 562816,
+        "cacheWrite": 0,
+        "cost": 0.007694772400000002,
+        "turns": 23
+      }
+    }
+  ],
+  "durationMs": 245443,
+  "toolCount": 45,
+  "launchContractDigest": "7377a7307ab29e847bdb4ef82ef0453737c941bbbe0e29ad88ad4e1d6bc9a6de",
+  "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+      "sha256:caccf83eebd3adb0"
+    ],
+    "configured": [],
+    "effective": [
+      "sha256:caccf83eebd3adb0"
+    ],
+    "omitted": {
+      "runtime": 0,
+      "configured": 0,
+      "effective": 0
+    }
+  },
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "17 findings delivered with severity (WATCH), file paths (e.g., storage/connection.py:83-90 pool leak, hybrid.py:90-117 misleading 'pgq' mode, index.ts:44-47 query-frozen injection, cli.ts:73-83 broken uv run --no-project fallback, plugin.json + before_prompt.py:46-58 silent no-op Claude install path, pyproject.toml:20-33 unused oracle deps) and a concrete alternative per finding; overall status WATCH, no BLOCK."
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "git diff ccbe6c4^..HEAD --stat",
+          "result": "not-run",
+          "summary": "No shell access; commit scope confirmed via .git/logs/refs/heads/main instead"
+        },
+        {
+          "command": "npm pack --dry-run",
+          "result": "not-run",
+          "summary": "Recommended for supervisor to verify tarball negations and absence of docs/ckg-banner.png"
+        },
+        {
+          "command": "uv sync --extra dev && uv run pytest tests/ -q",
+          "result": "not-run",
+          "summary": "Recommended for supervisor to confirm CI path and dependency resolution"
+        }
+      ],
+      "validationOutput": [
+        "Full source read of pi extension (4 TS files), Python core (9 modules), Claude plugin (plugin.json, marketplace.json, hooks/before_prompt.py), packaging (package.json, pyproject.toml, postinstall.js, .npmignore, install.sh), skills, commands, CI, README; grep-verified that oracleagentmemory/langchain-oracledb/langgraph-oracledb are never imported and that the pi dedup string 'CKG Structure Map' matches STRUCTURE_MAP_TEMPLATE output."
+      ],
+      "residualRisks": [
+        "pi before_agent_start event semantics (per-turn vs per-session) not verifiable from repo; stale-map finding conditional on it",
+        "Pinned Oracle dep versions (oracleagentmemory>=26.6.0, langchain-oracledb, langgraph-oracledb) existence on PyPI unverified",
+        "npm files-field negation patterns unverified; .npmignore provides defense-in-depth but npm pack --dry-run should confirm",
+        "Parser call-resolution dead code (empty sym_by_name) may degrade call-graph quality on arbitrary repos"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "Architectural review-only (no edits) of commits ccbe6c4 (Oracle PGQ CLI + pi plugin + Claude plugin + npm package), dccf4b5 (one-command installs, pi.dev listing, oracle deps), 1571bd6 (PGQ fallback message, tarball hygiene) on base c56f2ef; scope covers the entire feature codebase.",
+      "reviewFindings": [
+        "watch: src/ckg/storage/connection.py:83-90 - pools created per call, never closed (only oracle_summary closes); masked by process-per-prompt but leaks in long-lived embedding",
+        "watch: src/ckg/retrieval/hybrid.py:90-117 - method string reports 'pgq' even when anchors absent from PGQ; connect_pgq failures lose the actionable fallback hint",
+        "watch: pi/extensions/ckg/index.ts:44-47 - dedup guard freezes map at first coding prompt; stale for later different tasks if event fires per-turn",
+        "watch: pi/extensions/ckg/context.ts:80-91 - pkg_root defaults to dir name (wrong for src/ layouts), killed builds leave corrupt cache with no recovery, no build lock",
+        "watch: pi/extensions/ckg/cli.ts:73-83 - 'uv run --no-project ckg' runs in isolated env, ckg not resolvable in fresh clone; breaks pi -e quick-start",
+        "watch: hooks/before_prompt.py:46-58 + .claude-plugin/plugin.json - Claude marketplace install never bootstraps Python; silent {} no-op",
+        "watch: pyproject.toml:20-33 - oracleagentmemory/langchain-oracledb/langgraph-oracledb declared mandatory but imported nowhere; 'optional Oracle' claim false",
+        "watch: src/ckg/storage/oracle_pgq.py:145-192 - upserts never delete; PGQ store and oracle-status counts drift stale",
+        "watch: src/ckg/storage/oracle_pgq.py:87-126 - one GRAPH_TABLE query per hop (10/prompt) despite quantified-path capability",
+        "watch: package.json pi.image -> docs/ckg-banner.png - asset absent (no docs/), 404 on pi.dev listing",
+        "watch: version 0.1.0 duplicated in 6 files; license MIT vs MIT OR Apache-2.0 mismatch with MIT-only LICENSE",
+        "watch: hardcoded DB defaults dmuser/continual_learning in connection.py:41-42",
+        "watch: triplicated project-detection and preamble logic across pi/project.ts, claude/plugin.py, hooks/before_prompt.py",
+        "note: typebox peerDependency '*' unbounded; Windows venv discovery POSIX-only; .ckg/ cache written into user repos; env-derived SQL identifiers unvalidated; parser pass-2 has dead local-resolution code",
+        "status: WATCH - split and fail-open design sound for 0.1; no blockers"
+      ],
+      "manualNotes": "Review-only, no files modified, no progress.md written. Supervisor should re-run the three commandsRun items. The Claude marketplace install silently no-oping without a pre-installed Python CLI is the highest-priority user-facing fix (README or hook bootstrap)."
+    }
+  },
+  "effects": {
+    "fileMutation": {
+      "status": "not-applicable",
+      "expected": false,
+      "attempted": false
+    }
+  },
+  "transcriptPath": "/home/ubuntu/personal/ckg/.pi/subagents/artifacts/ebb0b18c_reviewer_0_transcript.jsonl",
+  "timestamp": 1786786674414
+}

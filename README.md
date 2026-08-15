@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/pi-Plugin-00D9FF?style=for-the-badge" alt="pi Plugin" />
   <img src="https://img.shields.io/badge/Oracle_AI_Database-26ai_Free-F80000?style=for-the-badge&logo=oracle&logoColor=white" alt="Oracle AI Database 26ai Free" />
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-6C47FF?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude Code Plugin" />
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache%202.0-blue.svg?style=for-the-badge" alt="License: MIT OR Apache-2.0" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge" alt="License: MIT" /></a>
 </p>
 
 ---
@@ -391,7 +391,7 @@ ckg/
 
 ## License
 
-MIT OR Apache-2.0
+MIT
 
 ---
 
