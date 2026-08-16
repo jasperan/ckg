@@ -1,0 +1,41 @@
+<svg width="1200" height="460" viewBox="0 0 1200 460" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#0E1A2E"/>
+    </linearGradient>
+    <linearGradient id="toast" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16233F"/>
+      <stop offset="1" stop-color="#101C33"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="460" fill="url(#bg)"/>
+  <text x="600" y="64" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="30" fill="#5B6B8C" letter-spacing="2">TERMINAL — PI TUI</text>
+
+  <!-- code pane -->
+  <rect x="60" y="96" width="1080" height="230" rx="12" fill="#0D1526" stroke="#1C2A47" stroke-width="1.5"/>
+  <text x="90" y="136" font-family="ui-monospace,Menlo,monospace" font-size="22" fill="#8A9BB8">❯ fix the bug in mod_b.py</text>
+  <circle cx="96" cy="172" r="6" fill="#00D9FF"/>
+  <text x="118" y="180" font-family="ui-monospace,Menlo,monospace" font-size="21" fill="#5B6B8C">analyzing dependency graph…</text>
+  <circle cx="96" cy="218" r="6" fill="#3DD68C"/>
+  <text x="118" y="226" font-family="ui-monospace,Menlo,monospace" font-size="21" fill="#8A9BB8">Anchors: mod_b.py · Reach: mod_a.py (imports)</text>
+  <circle cx="96" cy="264" r="6" fill="#3DD68C"/>
+  <text x="118" y="272" font-family="ui-monospace,Menlo,monospace" font-size="21" fill="#8A9BB8">Structure map appended to system prompt ✓</text>
+
+  <!-- toast -->
+  <g>
+    <rect x="60" y="350" width="760" height="58" rx="10" fill="url(#toast)" stroke="#2A3D63" stroke-width="1.5"/>
+    <circle cx="92" cy="379" r="7" fill="#00D9FF"/>
+    <text x="112" y="386" font-family="ui-monospace,Menlo,monospace" font-size="20" fill="#C6D2E8">CKG injected structure map</text>
+    <text x="112" y="412" font-family="ui-monospace,Menlo,monospace" font-size="17" fill="#5B6B8C">(2 anchors) into this task.</text>
+    <text x="778" y="386" text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="15" fill="#3D4F70">now</text>
+  </g>
+
+  <!-- footer status bar -->
+  <rect x="60" y="418" width="1080" height="30" rx="6" fill="#0F1830" stroke="#1C2A47" stroke-width="1.5"/>
+  <text x="84" y="439" font-family="ui-monospace,Menlo,monospace" font-size="17" fill="#5B6B8C">▌▌░░░░ 29% 286k/1.0M</text>
+  <text x="320" y="439" font-family="ui-monospace,Menlo,monospace" font-size="17" fill="#5B6B8C">~/personal/ckg (main)</text>
+  <text x="1010" y="439" text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="17" fill="#5B6B8C">opencode-go</text>
+  <text x="1120" y="439" text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="17" font-weight="bold" fill="#00D9FF">✓ CKG map injected (2 anchors)</text>
+</svg>

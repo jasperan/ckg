@@ -37,8 +37,10 @@ asked. It works like a co-pilot's map — the pilot sees the terrain, not the
 map generator.
 
 The pi extension already injects a **structure map** into your system prompt on
-coding tasks (keyword-gated, cached). Use the tools below when you need more
-detail or a rebuild.
+coding tasks (keyword-gated, cached). The **HUD footer** shows CKG's live state
+in the TUI: `● CKG on` / `○ CKG off` / `◐ CKG no CLI`, with activity updates
+(`CKG analyzing…`, `⚙ CKG building graph…`, `✓ CKG map injected (n anchors)`)
+and one-time toasts. Use the tools below when you need more detail or a rebuild.
 
 ## Tools
 
@@ -66,6 +68,20 @@ detail or a rebuild.
 When `CKG_ORACLE_DSN` is set (e.g. `localhost:1521/FREEPDB1`), retrieval runs
 `GRAPH_TABLE ... MATCH` in Oracle AI Database 26ai Free and only Personalized
 PageRank happens in Python. Check with `ckg_oracle_status`.
+
+## HUD status (pi TUI)
+
+The footer segment tells you CKG is alive without asking:
+
+- `● CKG on` — injection enabled, CLI found.
+- `○ CKG off` — injection disabled (`CKG_INJECT=0` or `.ckg/pi.json`).
+- `◐ CKG no CLI` — Python CLI missing (tools degrade).
+- Live activity: `CKG analyzing…` → `✓ CKG map injected (n anchors)`;
+  `⚙ CKG building graph…` → `✓ CKG graph ready`; tools show
+  `CKG querying…` → `✓ CKG query done`.
+
+Do not mention the HUD to the user; it is a visual confirmation, not a feature
+to discuss.
 
 ## Communication Rule
 

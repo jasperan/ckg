@@ -18,8 +18,9 @@
  * Oracle PGQ (GRAPH_TABLE MATCH); otherwise it falls back to in-memory.
  *
  * HUD: a footer status segment (via ctx.ui.setStatus) shows whether CKG is
- * enabled (● on / ○ off / ◐ no CLI) — cosmetic, never throws, no-op in
- * headless modes.
+ * enabled (● on / ○ off / ◐ no CLI) plus live activity feedback
+ * (analyzing… / ⚙ building… / ✓ map injected / ✓ graph ready) and one-time
+ * toasts — cosmetic, never throws, no-op in headless modes.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
