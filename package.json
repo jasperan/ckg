@@ -1,6 +1,6 @@
 {
   "name": "@jasperan/ckg",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Code Knowledge Graph (CKG) — structure-aware retrieval for coding agents. Parses codebases into typed graphs (imports/calls/co-edits), stores them in Oracle AI Database 26ai Free PGQ, and injects dependency-aware context into pi, Claude Code & Codex so agents find the right files faster.",
   "license": "MIT",
   "author": "Nacho Martinez <jasperan@users.noreply.github.com>",
@@ -55,8 +55,13 @@
     "node": ">=18"
   },
   "pi": {
-    "extensions": ["./pi/extensions/ckg/index.ts"],
-    "skills": ["./skills/ckg", "./skills/ckg-pi"],
+    "extensions": [
+      "./pi/extensions/ckg/index.ts"
+    ],
+    "skills": [
+      "./skills/ckg",
+      "./skills/ckg-pi"
+    ],
     "image": "https://raw.githubusercontent.com/jasperan/ckg/main/docs/ckg-banner.png"
   }
 }
