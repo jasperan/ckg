@@ -123,7 +123,9 @@ works as a **transparent plugin**: on every coding prompt it builds (or loads)
  your codebase's dependency graph and injects a compact **structure map** into
 the system prompt — no user action, ever. It also registers six tools
 (`ckg_status`, `ckg_build`, `ckg_load`, `ckg_query`, `ckg_inject`,
-`ckg_oracle_status`) and a `/ckg` command. `pi install npm:@jasperan/ckg` runs a
+`ckg_oracle_status`), a `/ckg` command, and a footer **HUD status** that shows
+whether CKG is live: `● CKG on` / `○ CKG off` (injection disabled via
+`CKG_INJECT=0` or config) / `◐ CKG no CLI`. `pi install npm:@jasperan/ckg` runs a
 postinstall that sets up the Python CLI in a bundled venv, so there is nothing
 extra to configure.
 

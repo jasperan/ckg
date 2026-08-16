@@ -14,8 +14,12 @@
  *   - Command: /ckg — status + usage.
  *
  * The Python CLI is required; it is auto-discovered (env CKG_CLI → bundled
- * venv → uv run → PATH). With CKG_ORACLE_DSN set, all retrieval runs through
+ * venv → PATH). With CKG_ORACLE_DSN set, all retrieval runs through
  * Oracle PGQ (GRAPH_TABLE MATCH); otherwise it falls back to in-memory.
+ *
+ * HUD: a footer status segment (via ctx.ui.setStatus) shows whether CKG is
+ * enabled (● on / ○ off / ◐ no CLI) — cosmetic, never throws, no-op in
+ * headless modes.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -24,20 +28,26 @@ import { discoverCli, runCli, installGuidance, type CliSpec } from "./cli";
 import { detectProject, hasGraphCache, graphCachePath } from "./project";
 import { loadSettings } from "./config";
 import { buildMap, newSessionState, statusBlock, type CkgSessionState } from "./context";
+import { updateHud, clearHud } from "./hud";
 
 export default function (pi: ExtensionAPI) {
   let state: CkgSessionState = newSessionState();
 
-  pi.on("session_start", () => {
+  pi.on("session_start", (_event, ctx) => {
     state = newSessionState();
+    updateHud(ctx);
   });
 
-  pi.on("session_shutdown", () => {
+  pi.on("session_shutdown", (_event, ctx) => {
     state = newSessionState();
+    clearHud(ctx);
   });
 
   // ── Transparent injection ─────────────────────────────────────────────────
   pi.on("before_agent_start", async (event, ctx) => {
+    // Keep the HUD in sync with the project's effective settings (cheap:
+    // only re-renders when the text changes).
+    updateHud(ctx, detectProject(ctx.cwd)?.root);
     if (!event.prompt) return;
     // Skip before doing any work when a map is already present (avoids paying
     // the inject subprocess cost on every prompt and pinning a stale map).
