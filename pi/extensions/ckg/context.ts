@@ -30,6 +30,30 @@ export function newSessionState(): CkgSessionState {
   return { buildsStarted: new Set(), cli: null };
 }
 
+/** Optional activity hooks so callers can surface CKG background work in the HUD. */
+export interface BuildHooks {
+  /** A structure map will be injected — show busy feedback. */
+  onInjectStart?: () => void;
+  /** A background graph build was just kicked off (no cache yet). */
+  onBuildStarted?: () => void;
+  /** The background build finished; ok=true on exit code 0. */
+  onBuildDone?: (ok: boolean) => void;
+  /** A structure map was produced; anchors = anchor-file count. */
+  onMap?: (anchors: number) => void;
+}
+
+/** Count anchor-file entries in a `ckg inject` structure map. */
+export function countAnchors(map: string): number {
+  const idx = map.indexOf("### Anchor Files");
+  if (idx < 0) return 0;
+  let n = 0;
+  for (const line of map.slice(idx).split("\n")) {
+    if (/^- `/.test(line)) n++;
+    else if (n > 0 && /^#{3,4} /.test(line)) break; // next section
+  }
+  return n;
+}
+
 const PREAMBLE = `## Code Knowledge Graph (CKG) — Structure-Aware Context
 
 A dependency graph of this codebase (imports, function calls, git co-edits) was
@@ -48,6 +72,7 @@ export async function buildMap(
   state: CkgSessionState,
   prompt: string,
   cwd: string,
+  hooks?: BuildHooks,
 ): Promise<string | null> {
   try {
     const settings = loadSettings();
@@ -65,14 +90,20 @@ export async function buildMap(
     if (!hasGraphCache(project.root)) {
       if (settings.autoBuild && !state.buildsStarted.has(project.root)) {
         state.buildsStarted.add(project.root);
-        void runCli(cli, ["build", project.root, "--pkg-root", projectName(project.root)], {
+        const proc = runCli(cli, ["build", project.root, "--pkg-root", projectName(project.root)], {
           timeoutMs: 120_000,
           cwd: project.root,
         });
+        hooks?.onBuildStarted?.();
+        void proc.then(
+          (r) => hooks?.onBuildDone?.(r.code === 0),
+          () => hooks?.onBuildDone?.(false),
+        );
       }
       return null;
     }
 
+    hooks?.onInjectStart?.();
     const result = await runCli(
       cli,
       ["inject", prompt, "--root", project.root],
@@ -81,6 +112,7 @@ export async function buildMap(
     if (result.code !== 0) return null;
     const map = result.stdout.trim();
     if (!map) return null;
+    hooks?.onMap?.(countAnchors(map));
     return `${PREAMBLE}\n\n${map}`;
   } catch {
     return null;

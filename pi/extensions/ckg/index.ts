@@ -27,14 +27,24 @@ import { join } from "node:path";
 import { discoverCli, runCli, installGuidance, type CliSpec } from "./cli";
 import { detectProject, hasGraphCache, graphCachePath } from "./project";
 import { loadSettings } from "./config";
-import { buildMap, newSessionState, statusBlock, type CkgSessionState } from "./context";
-import { updateHud, clearHud } from "./hud";
+import {
+  buildMap,
+  newSessionState,
+  statusBlock,
+  countAnchors,
+  type BuildHooks,
+  type CkgSessionState,
+} from "./context";
+import { updateHud, clearHud, notifyHud } from "./hud";
 
 export default function (pi: ExtensionAPI) {
   let state: CkgSessionState = newSessionState();
+  // Projects we already toasted about this session (injection / build done).
+  const notified = new Set<string>();
 
   pi.on("session_start", (_event, ctx) => {
     state = newSessionState();
+    notified.clear();
     updateHud(ctx);
   });
 
@@ -47,12 +57,43 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
     // Keep the HUD in sync with the project's effective settings (cheap:
     // only re-renders when the text changes).
-    updateHud(ctx, detectProject(ctx.cwd)?.root);
+    const root = detectProject(ctx.cwd)?.root;
+    updateHud(ctx, root);
     if (!event.prompt) return;
     // Skip before doing any work when a map is already present (avoids paying
     // the inject subprocess cost on every prompt and pinning a stale map).
     if (event.systemPrompt.includes("CKG Structure Map")) return;
-    const map = await buildMap(pi, state, event.prompt, ctx.cwd);
+    const hooks: BuildHooks = {
+      onInjectStart: () => {
+        updateHud(ctx, root, { kind: "working", detail: "analyzing…" });
+      },
+      onBuildStarted: () => {
+        updateHud(ctx, root, { kind: "building" });
+      },
+      onBuildDone: (ok) => {
+                updateHud(ctx, root, ok ? { kind: "done", detail: "graph ready" } : undefined);
+        const key = `build:${root ?? ""}`;
+        if (!notified.has(key)) {
+          notified.add(key);
+          notifyHud(
+            ctx,
+            ok
+              ? "CKG graph build finished — the next task gets the structure map."
+              : "CKG background graph build failed — run ckg_build to see why.",
+            ok ? "info" : "warning",
+          );
+        }
+      },
+      onMap: (anchors) => {
+        updateHud(ctx, root, { kind: "done", detail: `map injected (${anchors} anchors)` });
+        const key = `map:${root ?? ""}`;
+        if (!notified.has(key)) {
+          notified.add(key);
+          notifyHud(ctx, `CKG injected structure map (${anchors} anchors) into this task.`, "info");
+        }
+      },
+    };
+    const map = await buildMap(pi, state, event.prompt, ctx.cwd, hooks);
     if (!map) return;
     const suffix = `\n\n${map}`;
     return { systemPrompt: event.systemPrompt + suffix };
@@ -74,6 +115,22 @@ export default function (pi: ExtensionAPI) {
       return `ckg ${args.join(" ")} failed (exit ${result.code}):\n${err}`;
     }
     return result.stdout.trim();
+  }
+
+  /** Run a tool with busy/done HUD feedback; the text is the tool's output. */
+  async function withActivity(
+    ctx: ExtensionContext,
+    busy: string,
+    done: string,
+    fn: () => Promise<string>,
+  ): Promise<string> {
+    const root = detectProject(ctx.cwd)?.root;
+    updateHud(ctx, root, { kind: "working", detail: busy });
+    const out = await fn();
+    const failed =
+      out.startsWith("CKG CLI not found") || /\bfailed\b/.test(out.slice(0, 240)) || out.includes("(exit ");
+    updateHud(ctx, root, failed ? undefined : { kind: "done", detail: done });
+    return out;
   }
 
   // ── Tools ─────────────────────────────────────────────────────────────────
@@ -103,7 +160,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const args = ["build", resolvePath(params.path, ctx)];
       if (params.pkg_root) args.push("--pkg-root", params.pkg_root);
-      return { content: [{ type: "text", text: await execCli(ctx, args) }], details: {} };
+      return { content: [{ type: "text", text: await withActivity(ctx, "building…", "build done", () => execCli(ctx, args)) }], details: {} };
     },
   });
 
@@ -122,7 +179,7 @@ export default function (pi: ExtensionAPI) {
       const args = ["load", resolvePath(params.path, ctx)];
       if (params.pkg_root) args.push("--pkg-root", params.pkg_root);
       if (params.domain) args.push("--domain", params.domain);
-      return { content: [{ type: "text", text: await execCli(ctx, args, 180_000) }], details: {} };
+      return { content: [{ type: "text", text: await withActivity(ctx, "loading → PGQ…", "loaded → PGQ", () => execCli(ctx, args, 180_000)) }], details: {} };
     },
   });
 
@@ -144,7 +201,7 @@ export default function (pi: ExtensionAPI) {
       if (params.graph) args.push("--graph", resolvePath(params.graph, ctx));
       if (params.top_k) args.push("--top-k", String(params.top_k));
       if (params.hops) args.push("--hops", String(params.hops));
-      return { content: [{ type: "text", text: await execCli(ctx, args) }], details: {} };
+      return { content: [{ type: "text", text: await withActivity(ctx, "querying…", "query done", () => execCli(ctx, args)) }], details: {} };
     },
   });
 
@@ -161,7 +218,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const args = ["inject", params.query];
       if (params.root) args.push("--root", resolvePath(params.root, ctx));
-      return { content: [{ type: "text", text: await execCli(ctx, args) }], details: {} };
+      return { content: [{ type: "text", text: await withActivity(ctx, "injecting…", "map ready", () => execCli(ctx, args)) }], details: {} };
     },
   });
 
@@ -173,7 +230,7 @@ export default function (pi: ExtensionAPI) {
       "configured PGQ domain. In-memory mode when CKG_ORACLE_DSN is not set.",
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
-      return { content: [{ type: "text", text: await execCli(ctx, ["oracle-status"], 20_000) }], details: {} };
+      return { content: [{ type: "text", text: await withActivity(ctx, "checking PGQ…", "PGQ ok", () => execCli(ctx, ["oracle-status"], 20_000)) }], details: {} };
     },
   });
 
