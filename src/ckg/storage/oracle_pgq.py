@@ -15,9 +15,33 @@ Supports two operation modes:
 
 from __future__ import annotations
 
-from pathlib import Path
+import re
 
 DEFAULT_GRAPH_NAME = "ckg_code_graph"
+
+_IDENTIFIER_PART = r"[A-Za-z_][A-Za-z0-9_$#]*"
+_IDENTIFIER_RE = re.compile(_IDENTIFIER_PART + r"\Z")
+_QUALIFIED_IDENTIFIER_RE = re.compile(_IDENTIFIER_PART + r"(?:\." + _IDENTIFIER_PART + r")?\Z")
+_IDENTIFIER_MAX = 128
+
+
+def require_identifier(value: str, *, kind: str, allow_qualified: bool = False) -> str:
+    """Validate an Oracle identifier before it is interpolated into SQL.
+
+    Only graph names and table prefixes are ever interpolated (row values are
+    always bound parameters). Validating them keeps config/env values from
+    injecting DDL/DML through identifiers. Pass ``allow_qualified=True`` for
+    graph names, which may be schema-qualified (``SCHEMA.GRAPH``). Raises
+    ValueError otherwise.
+    """
+    pattern = _QUALIFIED_IDENTIFIER_RE if allow_qualified else _IDENTIFIER_RE
+    if (
+        not isinstance(value, str)
+        or not pattern.fullmatch(value)
+        or len(value) > _IDENTIFIER_MAX
+    ):
+        raise ValueError(f"invalid Oracle {kind}: {value!r}")
+    return value
 
 
 # --------------------------------------------------------------------------- #
@@ -38,6 +62,8 @@ def create_property_graph(
         graph_name: Property graph name in the database.
         table_prefix: Prefix for the node/edge tables.
     """
+    graph_name = require_identifier(graph_name, kind="graph name", allow_qualified=True)
+    table_prefix = require_identifier(table_prefix, kind="table prefix")
     pool = _require_pool(mem)
     nodes_table = f"{table_prefix}_NODES"
     edges_table = f"{table_prefix}_EDGES"
@@ -78,6 +104,7 @@ def match_neighborhood(
     """
     if hops < 1:
         raise ValueError("hops must be >= 1")
+    graph_name = require_identifier(graph_name, kind="graph name", allow_qualified=True)
     pool = _require_pool(mem)
     best: dict[str, int] = {}
     with pool.acquire() as conn:
@@ -109,6 +136,7 @@ def match_edges(
     dependency edges (import, call, co_edit) so the caller can label each
     connection by its edge type.
     """
+    graph_name = require_identifier(graph_name, kind="graph name", allow_qualified=True)
     pool = _require_pool(mem)
     sql = f"""
         SELECT neighbor, kind FROM GRAPH_TABLE ({graph_name}
@@ -137,6 +165,7 @@ def upsert_graph_nodes(
 
     Uses MERGE so re-runs are idempotent.
     """
+    table_prefix = require_identifier(table_prefix, kind="table prefix")
     pool = _require_pool(mem)
     with pool.acquire() as conn:
         cur = conn.cursor()
@@ -162,6 +191,7 @@ def upsert_graph_edges(
     mem, edges: list[dict], *, domain: str, table_prefix: str = "MEMORY_GRAPH",
 ) -> int:
     """Insert or update graph edges in Oracle."""
+    table_prefix = require_identifier(table_prefix, kind="table prefix")
     pool = _require_pool(mem)
     with pool.acquire() as conn:
         cur = conn.cursor()
@@ -187,6 +217,7 @@ def load_graph(
     mem, *, domain: str, table_prefix: str = "MEMORY_GRAPH",
 ) -> dict:
     """Load a previously stored graph from Oracle tables (offline fallback)."""
+    table_prefix = require_identifier(table_prefix, kind="table prefix")
     pool = _require_pool(mem)
     with pool.acquire() as conn:
         cur = conn.cursor()

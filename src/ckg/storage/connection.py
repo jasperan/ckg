@@ -22,7 +22,7 @@ import re
 import sys
 from types import SimpleNamespace
 
-from ckg.storage.oracle_pgq import DEFAULT_GRAPH_NAME
+from ckg.storage.oracle_pgq import DEFAULT_GRAPH_NAME, require_identifier
 
 _DEFAULT_PASSWORD = "continual_learning"
 
@@ -119,11 +119,9 @@ def oracle_summary() -> dict:
         return {"configured": False, "reason": "CKG_ORACLE_DSN not set (in-memory mode)"}
 
     summary: dict = {"configured": True, "dsn": redact_dsn(cfg["dsn"]), "domain": cfg["domain"]}
-    mem = None
     pool = None
     try:
         pool = create_pool(cfg)
-        mem = pgq_mem(pool)
         with pool.acquire() as conn:
             cur = conn.cursor()
             cur.execute("select banner from v$version where rownum = 1")
@@ -142,7 +140,10 @@ def oracle_summary() -> dict:
     try:
         with pool.acquire() as conn:
             cur = conn.cursor()
-            prefix = cfg["table_prefix"]
+            prefix = require_identifier(cfg["table_prefix"], kind="table prefix")
+            graph_name = require_identifier(
+                cfg["graph_name"], kind="graph name", allow_qualified=True
+            )
             cur.execute(
                 f"select count(*) from {prefix}_NODES where domain = :d",
                 d=cfg["domain"],
@@ -156,7 +157,7 @@ def oracle_summary() -> dict:
             cur.execute(
                 f"select count(*) from user_property_graphs "
                 f"where graph_name = :g",
-                g=cfg["graph_name"],
+                g=graph_name,
             )
             summary["property_graph"] = cur.fetchone()[0] > 0
     except Exception as exc:  # pragma: no cover - depends on live DB
