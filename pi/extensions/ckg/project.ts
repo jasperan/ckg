@@ -11,13 +11,13 @@ import { join } from "node:path";
 const CODING_KEYWORDS = [
   "implement", "add ", "fix", "change", "refactor", "build", "create",
   "modify", "update", "feature", "bug", "edit", "write", "debug", "deploy",
-  "function", "class", "module", "import", "api", "endpoint", "refactor",
+  "function", "class", "module", "import", "api", "endpoint",
   "test", "migrate", "upgrade", "rewrite", "optimize", "integrate",
 ];
 
 const CODING_PATTERNS = [
   /\b(implement|add|fix|change|refactor|build|create|modify|update|debug)\b.*\b(feature|bug|function|class|module|file|code|endpoint|api|test|support)\b/i,
-  /\b(write|write|edit)\b/i,
+  /\b(write|edit)\b/i,
 ];
 
 export function isCodingPrompt(prompt: string): boolean {

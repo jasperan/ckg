@@ -1,6 +1,5 @@
 """Tests for ckg.graph.builder — CodeGraph, enrichment, structure map rendering."""
 
-import pytest
 from ckg.graph.builder import CodeGraph, enrich_node_text, render_structure_map
 
 

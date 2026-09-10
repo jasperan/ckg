@@ -64,7 +64,7 @@ def cmd_load(args: argparse.Namespace) -> int:
     edges into the Oracle MEMORY_GRAPH tables and (re)creates the SQL property
     graph so GRAPH_TABLE ... MATCH queries run in the database.
     """
-    from ckg.storage.connection import oracle_config, connect_pgq
+    from ckg.storage.connection import oracle_config, connect_pgq, redact_dsn
     from ckg.storage.oracle_pgq import (
         upsert_graph_nodes, upsert_graph_edges, create_property_graph,
     )
@@ -85,7 +85,6 @@ def cmd_load(args: argparse.Namespace) -> int:
         return 1
 
     # Connect only after validating inputs so errors are meaningful.
-    from ckg.storage.connection import redact_dsn
     mem, cfg = connect_pgq(cfg)
     if mem is None:
         print(

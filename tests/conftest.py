@@ -3,7 +3,6 @@
 import json
 import os
 import subprocess
-import sys
 
 import pytest
 from pathlib import Path

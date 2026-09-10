@@ -17,7 +17,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { discoverCli, runCli, installGuidance, type CliSpec } from "./cli";
 import { detectProject, hasGraphCache, isCodingPrompt } from "./project";
-import { loadSettings, type CkgSettings } from "./config";
+import { loadSettings } from "./config";
 
 /** Per-session in-memory state so we build each project at most once. */
 export interface CkgSessionState {

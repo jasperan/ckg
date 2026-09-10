@@ -23,7 +23,6 @@ from ckg.storage.oracle_pgq import (
     DEFAULT_GRAPH_NAME,
 )
 from ckg.graph.parser import parse_tree
-from ckg.graph.builder import CodeGraph
 from ckg.retrieval.hybrid import hybrid_retrieve
 
 # ── Live-gating ──────────────────────────────────────────────────────────────

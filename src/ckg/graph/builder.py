@@ -9,7 +9,6 @@ receive in their system prompt.
 from __future__ import annotations
 
 import ast
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,8 +79,6 @@ class CodeGraph:
     @classmethod
     def from_dict(cls, data: dict) -> "CodeGraph":
         nodes = list(data.get("nodes", {}).values())
-        if isinstance(nodes, dict):  # nodes was a dict keyed by id
-            nodes = list(nodes)
         return cls(
             nodes=nodes,
             edges=data.get("edges", []),

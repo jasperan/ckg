@@ -206,7 +206,6 @@ def parse_tree(tree: Path, *, pkg_root: str) -> dict:
                         name = sub.func.attr
                     if name is None:
                         continue
-                    caller_sid = f"sym:{f_rel}::_callee_lookup"
                     targets = _resolve_call_target(name, f_rel, {}, mod_targets)
                     if not targets:
                         for t_rel in file_syms:

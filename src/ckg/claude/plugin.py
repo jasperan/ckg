@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ckg.claude.prompts import SYSTEM_PROMPT_PREAMBLE, STRUCTURE_MAP_TEMPLATE
+from ckg.claude.prompts import STRUCTURE_MAP_TEMPLATE
 
 
 def detect_project(cwd: Path | None = None) -> Path | None:

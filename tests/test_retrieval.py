@@ -1,6 +1,5 @@
 """Tests for ckg.retrieval — PPR, seed selection, hybrid pipeline."""
 
-import pytest
 from ckg.retrieval.pagerank import personalized_pagerank, seed_from_query
 from ckg.retrieval.hybrid import hybrid_retrieve, _memory_neighborhood, _label
 

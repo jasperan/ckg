@@ -5,11 +5,9 @@ Tests the CLI through its Python API (not subprocess) for determinism.
 
 import argparse
 import json
-import pytest
-import tempfile
 from pathlib import Path
 
-from ckg.cli.main import cmd_build, cmd_query, cmd_inject
+from ckg.cli.main import cmd_build, cmd_query
 
 
 class TestCliBuild:

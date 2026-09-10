@@ -26,13 +26,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { join } from "node:path";
 import { discoverCli, runCli, installGuidance, type CliSpec } from "./cli";
-import { detectProject, hasGraphCache, graphCachePath } from "./project";
-import { loadSettings } from "./config";
+import { detectProject, graphCachePath } from "./project";
 import {
   buildMap,
   newSessionState,
   statusBlock,
-  countAnchors,
   type BuildHooks,
   type CkgSessionState,
 } from "./context";
