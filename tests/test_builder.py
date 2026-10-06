@@ -102,3 +102,46 @@ class TestRenderStructureMap:
         result = render_structure_map(anchors, sample_cg)
         # Should include at least one file path
         assert "core.py" in result or "helpers.py" in result or "db.py" in result
+
+
+class TestRenderReach:
+    def test_via_names_the_source_file_not_the_edge_kind(self, sample_cg):
+        out = render_structure_map(["file:core.py"], sample_cg)
+        line = next(l for l in out.splitlines() if "*(via" in l)
+        assert "core.py" in line
+        assert "(via import" not in line
+
+    def test_call_edges_link_files(self):
+        cg = CodeGraph.from_dict({
+            "nodes": {
+                "file:a.py": {"id": "file:a.py", "kind": "file", "text": "a"},
+                "file:b.py": {"id": "file:b.py", "kind": "file", "text": "b"},
+                "sym:a.py::f": {"id": "sym:a.py::f", "kind": "sym", "text": "f"},
+                "sym:b.py::g": {"id": "sym:b.py::g", "kind": "sym", "text": "g"},
+            },
+            "edges": [
+                {"src": "file:a.py", "dst": "sym:a.py::f", "kind": "contains"},
+                {"src": "file:b.py", "dst": "sym:b.py::g", "kind": "contains"},
+                {"src": "sym:a.py::f", "dst": "sym:b.py::g", "kind": "call"},
+            ],
+        })
+        out = render_structure_map(["file:a.py"], cg)
+        assert "`b.py`" in out and "calls" in out
+        out = render_structure_map(["file:b.py"], cg)
+        assert "`a.py`" in out
+
+
+class TestEnrichRobustness:
+    def test_syntax_error_file_is_left_unenriched(self, tmp_path):
+        (tmp_path / "bad.py").write_text("def (:\n")
+        node = {"id": "file:bad.py", "kind": "file", "text": "Module bad.py in p."}
+        assert enrich_node_text(tmp_path, node, "p")["text"] == "Module bad.py in p."
+
+    def test_method_enrichment_uses_the_right_class(self, tmp_path):
+        (tmp_path / "m.py").write_text(
+            "class A:\n    def run(self, x):\n        '''alpha doc'''\n\n"
+            "class B:\n    def run(self, y):\n        '''beta doc'''\n"
+        )
+        node = {"id": "sym:m.py::B.run", "kind": "sym", "text": "run in m.py (p)."}
+        text = enrich_node_text(tmp_path, node, "p")["text"]
+        assert "beta doc" in text and "alpha doc" not in text
