@@ -28,6 +28,11 @@ def _oracle_mem(cfg: dict | None = None):
 
     return connect_pgq(cfg)
 
+def _opt(value: int | None, default: int) -> int:
+    """CLI int option with a default only when the flag was omitted (0 is valid)."""
+    return default if value is None else int(value)
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     """Parse a Python source tree into a code graph and cache it."""
     tree = Path(args.path).resolve()
@@ -85,7 +90,7 @@ def cmd_load(args: argparse.Namespace) -> int:
         return 1
 
     # Connect only after validating inputs so errors are meaningful.
-    mem, cfg = connect_pgq(cfg)
+    mem, _ = connect_pgq(cfg)
     if mem is None:
         print(
             f"error: cannot connect to Oracle at {redact_dsn(cfg['dsn'])} — "
@@ -155,7 +160,15 @@ def cmd_query(args: argparse.Namespace) -> int:
         print(f"error: no graph at {graph_path}. Run 'ckg build' first.", file=sys.stderr)
         return 1
 
-    graph = json.loads(graph_path.read_text())
+    try:
+        graph = json.loads(graph_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"error: cannot read graph {graph_path}: {exc}. Re-run 'ckg build'.",
+              file=sys.stderr)
+        return 1
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), dict):
+        print(f"error: {graph_path} is not a ckg graph. Re-run 'ckg build'.", file=sys.stderr)
+        return 1
     from ckg.retrieval.hybrid import hybrid_retrieve
 
     mem, cfg = (None, None)
@@ -166,9 +179,9 @@ def cmd_query(args: argparse.Namespace) -> int:
         args.query, graph,
         mem=mem,
         domain=cfg["domain"] if cfg else None,
-        k_anchor=int(args.k_anchor or 5),
-        hops=int(args.hops or 2),
-        top_k=int(args.top_k or 10),
+        k_anchor=_opt(args.k_anchor, 5),
+        hops=_opt(args.hops, 2),
+        top_k=_opt(args.top_k, 10),
         graph_name=cfg["graph_name"] if cfg else "ckg_code_graph",
     )
 

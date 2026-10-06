@@ -105,3 +105,52 @@ class TestCliInject:
         result = inject_context("anything", project_root=Path("/nonexistent"))
         assert result == ""
 
+
+
+class TestCliLoadErrors:
+    def test_load_reports_unreachable_oracle_instead_of_crashing(
+        self, sample_pkg_path, tmp_path, monkeypatch, capsys
+    ):
+        from ckg.cli.main import cmd_load
+
+        monkeypatch.setenv("CKG_ORACLE_DSN", "db.invalid:1521/FREEPDB1")
+        monkeypatch.setenv("CKG_ORACLE_PASSWORD", "x")
+        monkeypatch.setattr(
+            "ckg.storage.connection.create_pool",
+            lambda cfg: (_ for _ in ()).throw(RuntimeError("unreachable")),
+        )
+        ns = argparse.Namespace(path=str(sample_pkg_path), pkg_root=None,
+                                graph=str(tmp_path / "g.json"), domain=None)
+        assert cmd_load(ns) == 1
+        assert "cannot connect to Oracle at db.invalid" in capsys.readouterr().err
+
+
+class TestCliQueryInputs:
+    def test_corrupt_graph_is_an_error_not_a_traceback(self, tmp_path, capsys):
+        bad = tmp_path / "graph.json"
+        bad.write_text("{not json")
+        ns = argparse.Namespace(query="x", graph=str(bad), k_anchor=None,
+                                hops=None, top_k=None, no_pgq=True)
+        assert cmd_query(ns) == 1
+        assert "cannot read graph" in capsys.readouterr().err
+
+    def test_zero_top_k_is_honoured(self, sample_pkg_path, tmp_path, capsys):
+        output = tmp_path / "graph.json"
+        cmd_build(argparse.Namespace(path=str(sample_pkg_path), pkg_root="sample_pkg",
+                                     output=str(output)))
+        capsys.readouterr()
+        ns = argparse.Namespace(query="validate email", graph=str(output), k_anchor=3,
+                                hops=2, top_k=0, no_pgq=True)
+        assert cmd_query(ns) == 0
+        lines = [l for l in capsys.readouterr().out.splitlines() if l.startswith("  0.") or l.startswith("  1.")]
+        assert lines == []
+
+
+class TestCliBuildRobustness:
+    def test_build_survives_syntax_error_file(self, tmp_path):
+        (tmp_path / "ok.py").write_text("def f(): pass\n")
+        (tmp_path / "bad.py").write_text("def (:\n")
+        out = tmp_path / "out.json"
+        rc = cmd_build(argparse.Namespace(path=str(tmp_path), pkg_root="p", output=str(out)))
+        assert rc == 0
+        assert "sym:ok.py::f" in json.loads(out.read_text())["nodes"]
