@@ -91,7 +91,7 @@ def hybrid_retrieve(
         except Exception as exc:  # PGQ unavailable — fall back to in-memory
             import re as _re
             m = _re.search(r"ORA-\d+: ([^\n]+)", str(exc))
-            hint = (m.group(1).strip() if m else str(exc).splitlines()[0])[:60]
+            hint = (m.group(1).strip() if m else (str(exc).splitlines() or [type(exc).__name__])[0])[:60]
             method = f"memory (pgq unavailable: {hint}; run 'ckg load' to store the graph)"
             neighborhood = _memory_neighborhood(graph, anchors, hops=hops)
     else:

@@ -42,30 +42,25 @@ def personalized_pagerank(
 
     idx = {n: i for i, n in enumerate(nodes)}
     n = len(nodes)
-    M = np.zeros((n, n), dtype=np.float64)
-    dangling = np.zeros(n, dtype=np.float64)
 
-    # Build transition matrix from edges
-    out_degree: dict[str, float] = {node: 1.0 for node in nodes}  # +1 for self-loop
+    # Edge list as index arrays — O(E) memory instead of a dense n×n matrix.
+    src_ix: list[int] = []
+    dst_ix: list[int] = []
     for edge in graph.get("edges", []):
-        src, dst = edge["src"], edge["dst"]
-        if src in idx and dst in idx:
-            out_degree[src] = out_degree.get(src, 1.0) + 1.0
+        s_i, d_i = idx.get(edge["src"]), idx.get(edge["dst"])
+        if s_i is not None and d_i is not None:
+            src_ix.append(s_i)
+            dst_ix.append(d_i)
+    src_arr = np.asarray(src_ix, dtype=np.intp)
+    dst_arr = np.asarray(dst_ix, dtype=np.intp)
 
-    for edge in graph.get("edges", []):
-        src, dst = edge["src"], edge["dst"]
-        if src in idx and dst in idx:
-            M[idx[dst], idx[src]] += 1.0 / out_degree[src]
+    # +1 per node for the lazy self-loop
+    out_degree = 1.0 + np.bincount(src_arr, minlength=n).astype(np.float64)
+    dangling = (out_degree == 1.0).astype(np.float64)  # only the self-loop
 
-    # Self-loops
-    for node_id in nodes:
-        i = idx[node_id]
-        M[i, i] += 1.0 / out_degree[node_id]
-
-    # Dangling nodes
-    for i, node_id in enumerate(nodes):
-        if out_degree[node_id] == 1.0:  # only the self-loop
-            dangling[i] = 1.0
+    def step(r: np.ndarray) -> np.ndarray:
+        share = r / out_degree
+        return share + np.bincount(dst_arr, weights=share[src_arr], minlength=n)
 
     # Seed vector
     p = np.zeros(n, dtype=np.float64)
@@ -80,12 +75,22 @@ def personalized_pagerank(
     r = p.copy()
     for _ in range(iters):
         dmass = float(r @ dangling)
-        r = alpha * (M @ r) + alpha * dmass * p + (1 - alpha) * p
+        r = alpha * step(r) + alpha * dmass * p + (1 - alpha) * p
 
     total = r.sum() or 1.0
     r = r / total
 
     return {nodes[i]: float(r[i]) for i in range(n)}
+
+
+# Words that carry no signal for matching: English glue words, plus the words
+# the parser/enricher put in *every* node's text ("Module x.py in pkg.",
+# "run in x.py (pkg).", "def run(...)"). Without this a query containing
+# "in" matches every node and floods the anchors with arbitrary files.
+_STOPWORDS = frozenset({
+    "a", "an", "the", "of", "to", "in", "on", "at", "for", "and", "or", "is",
+    "it", "be", "as", "by", "with", "from", "that", "this", "py", "module", "def",
+})
 
 
 def seed_from_query(
@@ -114,11 +119,12 @@ def seed_from_query(
     def _tokens(text: str) -> set[str]:
         out: set[str] = set()
         for raw in _token_re.findall(text.lower()):
-            out.add(raw)
+            if raw not in _STOPWORDS:
+                out.add(raw)
             # Also split snake_case
             parts = raw.split("_")
             if len(parts) > 1:
-                out.update(p for p in parts if len(p) > 1)
+                out.update(p for p in parts if len(p) > 1 and p not in _STOPWORDS)
         return out
 
     query_tokens = _tokens(query)
