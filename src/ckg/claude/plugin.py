@@ -94,15 +94,17 @@ def build_context_map(
     from ckg.graph.builder import CodeGraph
     cg = CodeGraph.from_dict(graph)
 
-    # Extract anchors as file IDs — prefer the lexical seed anchors, which are
-    # the actual entry points (they may rank below symbols in the PPR results).
-    anchors = [a for a in results.get("anchors", []) if a.startswith("file:")][:5]
+    # Lexical anchors are the actual entry points. Symbol anchors are lifted
+    # to their containing file; with no lexical match there is nothing
+    # relevant to show, and an arbitrary hub-file map would be noise.
+    anchors: list[str] = []
+    for a in results.get("anchors", []):
+        if a.startswith("sym:"):
+            a = "file:" + a.removeprefix("sym:").split("::", 1)[0]
+        if a not in anchors:
+            anchors.append(a)
+    anchors = anchors[:5]
     if not anchors:
-        anchors = [r["node_id"] for r in results["results"]
-                   if r["node_id"].startswith("file:")][:5]
-    if not anchors:
-        # Nothing in the graph matched the query: an arbitrary hub-file map
-        # would be noise presented as "lexical match", so inject nothing.
         return None
 
     from ckg.graph.builder import render_structure_map

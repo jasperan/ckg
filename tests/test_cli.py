@@ -174,3 +174,13 @@ class TestInjectContext:
         rebuilt = json.loads((cache / "code_graph.json").read_text())
         # docstring evidence only exists in enriched node text
         assert "sample package" in rebuilt["nodes"]["file:core.py"]["text"].lower()
+
+    def test_symbol_only_match_is_anchored_on_its_file(self, tmp_path):
+        from ckg.claude.plugin import build_context_map
+
+        (tmp_path / "pyproject.toml").write_text("")
+        (tmp_path / "billing.py").write_text("def charge_card():\n    pass\n")
+        (tmp_path / "other.py").write_text("X = 1\n")
+        out = build_context_map("charge_card", tmp_path, cache_dir=tmp_path / ".ckg")
+        assert out is not None
+        assert "`billing.py`" in out.split("### Dependency Reach")[0]
