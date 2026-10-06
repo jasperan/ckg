@@ -154,3 +154,23 @@ class TestCliBuildRobustness:
         rc = cmd_build(argparse.Namespace(path=str(tmp_path), pkg_root="p", output=str(out)))
         assert rc == 0
         assert "sym:ok.py::f" in json.loads(out.read_text())["nodes"]
+
+
+class TestInjectContext:
+    def test_query_matching_nothing_injects_nothing(self, sample_pkg_path, tmp_path):
+        from ckg.claude.plugin import inject_context
+
+        assert inject_context("zzqx plugh", project_root=sample_pkg_path,
+                              cache_dir=tmp_path / ".ckg") == ""
+
+    def test_corrupt_cache_is_rebuilt_with_enriched_text(self, sample_pkg_path, tmp_path):
+        from ckg.claude.plugin import build_context_map
+
+        cache = tmp_path / ".ckg"
+        cache.mkdir()
+        (cache / "code_graph.json").write_text("[]")  # valid JSON, not a graph
+        out = build_context_map("process order validation", sample_pkg_path, cache_dir=cache)
+        assert out and "core.py" in out
+        rebuilt = json.loads((cache / "code_graph.json").read_text())
+        # docstring evidence only exists in enriched node text
+        assert "sample package" in rebuilt["nodes"]["file:core.py"]["text"].lower()

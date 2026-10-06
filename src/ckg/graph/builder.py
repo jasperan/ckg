@@ -9,6 +9,7 @@ receive in their system prompt.
 from __future__ import annotations
 
 import ast
+from functools import lru_cache
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -86,6 +87,36 @@ class CodeGraph:
         )
 
 
+@lru_cache(maxsize=64)
+def _parse_source(path: str, mtime_ns: int) -> ast.Module | None:
+    """Parse a file once for all of its nodes; None when unreadable/invalid."""
+    try:
+        return ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
+    except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
+        return None
+
+
+def _load_module(fp: Path) -> ast.Module | None:
+    try:
+        return _parse_source(str(fp), fp.stat().st_mtime_ns)
+    except OSError:
+        return None
+
+
+def build_graph(tree: Path, *, pkg_root: str) -> dict:
+    """Parse ``tree`` and enrich every node's text from source.
+
+    The single entry point used by ``ckg build``/``ckg load`` and the plugin's
+    on-demand cache build, so all graph caches carry the same node text.
+    """
+    from ckg.graph.parser import parse_tree
+
+    graph = parse_tree(tree, pkg_root=pkg_root)
+    for node in graph["nodes"].values():
+        enrich_node_text(Path(tree), node, pkg_root)
+    return graph
+
+
 def enrich_node_text(tree: Path, node: dict, pkg_root: str) -> dict:
     """Enrich a node's text with source-code evidence.
 
@@ -98,15 +129,8 @@ def enrich_node_text(tree: Path, node: dict, pkg_root: str) -> dict:
     if kind == "file":
         file_rel = nid.removeprefix("file:")
         fp = tree / file_rel
-        if not fp.exists():
-            return node
-        try:
-            source = fp.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return node
-        try:
-            mod = ast.parse(source, filename=str(fp))
-        except (SyntaxError, ValueError):
+        mod = _load_module(fp)
+        if mod is None:
             return node
         extras: list[str] = []
         # Docstring
@@ -135,15 +159,8 @@ def enrich_node_text(tree: Path, node: dict, pkg_root: str) -> dict:
             return node
         file_rel, qualname = parts
         fp = tree / file_rel
-        if not fp.exists():
-            return node
-        try:
-            source = fp.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return node
-        try:
-            mod = ast.parse(source, filename=str(fp))
-        except (SyntaxError, ValueError):
+        mod = _load_module(fp)
+        if mod is None:
             return node
         # Walk to find the function/class
         sym_node = _find_symbol(mod, qualname)

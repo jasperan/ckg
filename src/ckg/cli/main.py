@@ -45,16 +45,10 @@ def cmd_build(args: argparse.Namespace) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Parsing {tree} (pkg_root={pkg_root}) ...")
-    from ckg.graph.parser import parse_tree
-    from ckg.graph.builder import enrich_node_text
+    from ckg.graph.builder import build_graph
 
-    graph = parse_tree(tree, pkg_root=pkg_root)
-
-    # Enrich node text from source
+    graph = build_graph(tree, pkg_root=pkg_root)
     nodes = list(graph["nodes"].values())
-    for node in nodes:
-        enrich_node_text(tree, node, pkg_root)
-    graph["nodes"] = {n["id"]: n for n in nodes}
 
     output.write_text(json.dumps(graph, indent=2, sort_keys=True) + "\n")
     print(f"Wrote {len(nodes)} nodes, {len(graph['edges'])} edges → {output}")
@@ -103,14 +97,10 @@ def cmd_load(args: argparse.Namespace) -> int:
     graph_path = Path(args.graph or (tree / ".ckg" / "code_graph.json"))
 
     # Parse (or reuse a cached graph)
-    from ckg.graph.parser import parse_tree
-    from ckg.graph.builder import enrich_node_text
+    from ckg.graph.builder import build_graph
 
-    graph = parse_tree(tree, pkg_root=pkg_root)
+    graph = build_graph(tree, pkg_root=pkg_root)
     nodes = list(graph["nodes"].values())
-    for node in nodes:
-        enrich_node_text(tree, node, pkg_root)
-    graph["nodes"] = {n["id"]: n for n in nodes}
 
     graph_path.parent.mkdir(parents=True, exist_ok=True)
     graph_path.write_text(json.dumps(graph, indent=2, sort_keys=True) + "\n")
