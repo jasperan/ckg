@@ -178,6 +178,19 @@ _KIND_LABEL: dict[str, str] = {
     "contains": "contains",
 }
 
+_MAP_LABEL_MAX = 200
+_MAP_PATH_MAX = 200
+_MAP_STRIP = {ord(c): None for c in "`*#[]<>|"}
+
+
+def _render_text(value: object, limit: int) -> str:
+    """Untrusted graph text (repo docstrings, strings, cache files) as one
+    bounded line without markdown structure, so it cannot open headings,
+    rules or fences inside the injected map."""
+    text = " ".join(str(value).split()).translate(_MAP_STRIP)
+    text = text.replace("---", "-")
+    return text[:limit]
+
 
 def render_structure_map(
     anchors: list[str],
@@ -232,8 +245,8 @@ def render_structure_map(
     ]
     for a in anchors:
         node = graph.node(a)
-        rel = a.removeprefix("file:")
-        label = node["text"] if node else rel
+        rel = _render_text(a.removeprefix("file:"), _MAP_PATH_MAX)
+        label = _render_text(node["text"], _MAP_LABEL_MAX) if node else rel
         parts.append(f"- `{rel}` — {label}")
 
     parts.append("")
@@ -249,12 +262,14 @@ def render_structure_map(
             key=lambda kv: (min(d for _, _, d in kv[1]), kv[0]),
         )[:max_extra]
         for file_id, sources in ordered:
-            rel = file_id.removeprefix("file:")
+            rel = _render_text(file_id.removeprefix("file:"), _MAP_PATH_MAX)
             node = graph.node(file_id)
-            label = node["text"] if node else rel
+            label = _render_text(node["text"], _MAP_LABEL_MAX) if node else rel
             kinds = sorted({_KIND_LABEL.get(k, k) for _, k, _ in sources})
             via = sorted({s[1] for s in sources})  # via which nodes
-            via_display = ", ".join(v.removeprefix("file:") for v in via[:3])
+            via_display = ", ".join(
+                _render_text(v.removeprefix("file:"), _MAP_PATH_MAX) for v in via[:3]
+            )
             parts.append(
                 f"- `{rel}` — {label}\n"
                 f"  *(via {via_display}, {', '.join(kinds)})*"
