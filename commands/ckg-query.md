@@ -10,9 +10,10 @@ over the cached code graph. Uses Oracle PGQ when configured, in-memory
 otherwise.
 
 ```bash
-ckg query "{{query}}" --graph .ckg/code_graph.json
+ckg query --graph .ckg/code_graph.json -- "$ARGUMENTS"
 ```
 
-Use the ranked results as the starting point for exploration — the anchors are
-what keyword search finds anyway; the ranked list below them surfaces the
-structurally-important dependencies.
+The anchors are what the query names directly; the ranked list below them adds
+the structurally close files and symbols (callers, callees, importers,
+co-edited files). No anchors means the query names nothing in the code: retry
+with identifiers from the task.

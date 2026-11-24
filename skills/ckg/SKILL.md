@@ -1,40 +1,10 @@
 ---
 name: ckg
-version: 0.1.0
 description: >
-  Code Knowledge Graph (CKG) — transparent background dependency analysis
-  for coding agents. Builds a typed graph (imports, calls, co-edits) and
-  injects a structure map so agents find the right files faster.
-activation:
-  keywords:
-    - implement
-    - add
-    - fix
-    - change
-    - refactor
-    - build
-    - create
-    - modify
-    - update
-    - feature
-    - bug
-    - edit
-    - write
-    - debug
-    - deploy
-  patterns:
-    - "implement.*feature"
-    - "fix.*bug"
-    - "add.*function"
-    - "change.*file"
-    - "refactor.*module"
-    - "write.*code"
-  tags:
-    - code-graph
-    - dependency-analysis
-    - retrieval
-    - agent-context
-  max_context_tokens: 2000
+  Code Knowledge Graph (CKG) — dependency-aware context for coding tasks in
+  Python projects. Use at the start of a task that edits, creates or debugs
+  source files: it names the files a change is likely to touch (anchors plus
+  their import / call / co-edit neighbours).
 ---
 
 # CKG — Code Knowledge Graph
@@ -43,34 +13,32 @@ CKG runs **silently in the background**. Never mention it to the user unless
 asked. It works like a co-pilot's map — the pilot sees the terrain, not
 the map generator.
 
-## Activation
+## When to use
 
-Activate on any coding task where:
-1. The project has a `.git` directory
-2. The task involves editing, creating, or modifying source files
-3. CKG is available (`which ckg` or `python -c "import ckg"` succeeds)
+On a coding task in a project with Python sources, when the `ckg` CLI is
+available (`ckg --version` succeeds). If a `CKG Structure Map` is already in
+your context for this task, use that one and skip the steps below.
 
 ## Workflow
 
-### 1. Check + Build (silent)
+### 1. Get the structure map
 
 ```bash
-if ! [ -f .ckg/code_graph.json ]; then
-  ckg build . --pkg-root "$(basename $(pwd))" 2>/dev/null || true
-fi
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+ckg inject --root "$PROJECT_ROOT" -- "<1-sentence task summary>" 2>/dev/null
 ```
 
-### 2. Inject Context (before tool calls)
+The first call in a project builds the dependency graph (a few seconds; cached
+in `.ckg/`, refreshed automatically when sources change). Exit code 1 with no
+output means the summary names nothing in the code — retry with identifiers
+from the task (function, class or file names).
 
-```bash
-ckg inject "<1-sentence task summary>" --root "$PROJECT_ROOT" 2>/dev/null
-```
-
-Append the output to your context. The structure map shows:
+The map shows:
 - **Anchor files** — lexically relevant to the task
-- **Dependency reach** — connected via imports, calls, co-edits
+- **Dependency reach** — connected via imports, calls, co-edits, most relevant
+  first, each with how it relates to the anchors
 
-### 3. Use the Map
+### 2. Use the map
 
 - Start exploration from anchor + reach files
 - Check co-edited files for parallel changes

@@ -41,18 +41,19 @@ cd "$PROJECT_DIR"
 # --------------------------------------------------------------------------- #
 echo "  [2/4] Installing the Python CLI (uv preferred) ..."
 if command -v uv &> /dev/null; then
-    uv sync --quiet || true
-else
+    uv sync --quiet --no-dev --frozen || echo "        uv sync failed — see the error above"
+elif command -v python3 &> /dev/null; then
     python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -e . --quiet || true
+    .venv/bin/pip install --quiet . || echo "        pip install failed — see the error above"
+else
+    echo "        Neither uv nor python3 found — install one of them and re-run."
 fi
 
 CLI="$PROJECT_DIR/.venv/bin/ckg"
 if [ -x "$CLI" ]; then
-    echo "        CKG CLI: $CLI"
+    echo "        CKG CLI: $CLI ($("$CLI" --version 2>/dev/null || echo 'not runnable'))"
 else
-    echo "        CKG CLI: not found (add .venv/bin to PATH if needed)"
+    echo "        CKG CLI: not installed — agent plugins will report it as missing"
 fi
 
 # --------------------------------------------------------------------------- #
@@ -70,38 +71,44 @@ else
             pi)
                 if command -v pi &> /dev/null; then
                     echo "        pi → pi install $PROJECT_DIR"
-                    pi install "$PROJECT_DIR" 2>/dev/null || \
-                        { mkdir -p "$HOME/.pi/agent/extensions" && \
-                          rm -rf "$HOME/.pi/agent/extensions/ckg" && \
-                          cp -r "$PROJECT_DIR/pi/extensions/ckg" "$HOME/.pi/agent/extensions/ckg" && \
-                          echo "        pi → copied extension to ~/.pi/agent/extensions/ckg/"; }
+                    if ! pi install "$PROJECT_DIR"; then
+                        echo "        pi → install failed (see the error above); retry: pi install $PROJECT_DIR"
+                    fi
                 else
-                    echo "        pi → 'pi' CLI not found (skip; install pi first: npm i -g pi-coding-agent)"
+                    echo "        pi → 'pi' CLI not found (skip; install it: npm install -g --ignore-scripts @earendil-works/pi-coding-agent)"
                 fi
                 ;;
             claude)
                 if command -v claude &> /dev/null; then
                     echo "        claude → marketplace add + plugin install"
-                    (claude plugin marketplace add "$PROJECT_DIR" 2>/dev/null || true)
-                    (claude plugin install ckg 2>/dev/null || true) || \
-                        { DST="$HOME/.claude/skills/ckg"
-                          mkdir -p "$(dirname "$DST")"
-                          rm -rf "$DST" 2>/dev/null || true
-                          cp -r "$PROJECT_DIR/skills/ckg" "$DST"
-                          echo "        claude → copied skill to ~/.claude/skills/ckg/"; }
+                    claude plugin marketplace add "$PROJECT_DIR" > /dev/null 2>&1 || true
+                    if ! claude plugin install ckg > /dev/null 2>&1; then
+                        DST="$HOME/.claude/skills/ckg"
+                        mkdir -p "$(dirname "$DST")"
+                        rm -rf "$DST"
+                        cp -r "$PROJECT_DIR/skills/ckg" "$DST"
+                        echo "        claude → plugin install failed; copied the skill to ~/.claude/skills/ckg/ (no prompt hook)"
+                    fi
                 else
                     echo "        claude → 'claude' CLI not found (skip)"
                 fi
                 ;;
-            codex|opencode)
+            codex)
+                DST="${CODEX_HOME:-$HOME/.codex}/skills/ckg"
+                mkdir -p "$(dirname "$DST")"
+                rm -rf "$DST"
+                cp -r "$PROJECT_DIR/skills/ckg" "$DST"
+                echo "        codex → $DST/"
+                ;;
+            opencode)
                 DST="$HOME/.config/opencode/skills/ckg"
                 mkdir -p "$(dirname "$DST")"
-                rm -rf "$DST" 2>/dev/null || true
+                rm -rf "$DST"
                 cp -r "$PROJECT_DIR/skills/ckg" "$DST"
-                echo "        codex → ~/.config/opencode/skills/ckg/"
+                echo "        opencode → $DST/"
                 ;;
             *)
-                echo "        Unknown agent: $agent (use pi,claude,codex)"
+                echo "        Unknown agent: $agent (use pi,claude,codex,opencode)"
                 ;;
         esac
     done
@@ -116,7 +123,7 @@ if command -v docker &> /dev/null; then
         echo "        Oracle container detected — set CKG_ORACLE_DSN/USER/PASSWORD in your shell."
     else
         echo "        None detected. Run one command to start it:"
-        echo "        docker run -d --name ckg-oracle -p 1521:1521 -e ORACLE_PWD=continual_learning container-registry.oracle.com/database/free:latest"
+        echo "        docker run -d --name ckg-oracle -p 1521:1521 -e ORACLE_PASSWORD=change_me -e APP_USER=dmuser -e APP_USER_PASSWORD=continual_learning gvenzl/oracle-free:latest"
     fi
 else
     echo "        docker not found (skip)"

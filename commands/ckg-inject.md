@@ -5,11 +5,11 @@ argument-hint: "<task summary>"
 
 # CKG Inject
 
-Generate the full structure map (anchor files + dependency reach) for the
-current task, ready to append to context.
+Generate the structure map (anchor files + dependency reach) for the task,
+ready to append to context.
 
 ```bash
-ckg inject "{{task_summary}}"
+ckg inject --refresh sync -- "$ARGUMENTS"
 ```
 
 Read the output carefully:
@@ -18,4 +18,6 @@ Read the output carefully:
 - **Dependency Reach** — files connected via imports, calls, or co-edits;
   changing an anchor often requires changing these too.
 
-The map is a starting point, not a constraint.
+Exit code 1 with "no context map available" means the task summary names
+nothing in the code: retry with identifiers from the task. The map is a
+starting point, not a constraint.
