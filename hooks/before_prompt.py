@@ -153,7 +153,7 @@ def main() -> int:
             return 0
 
         proc = subprocess.run(
-            [*cmd, "inject", prompt, "--root", str(root)],
+            [*cmd, "inject", "--root", str(root), "--", prompt],  # "--": prompt may start with "-"
             capture_output=True,
             text=True,
             timeout=TIMEOUT_SECONDS,

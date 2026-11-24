@@ -154,10 +154,12 @@ def oracle_summary() -> dict:
                 d=cfg["domain"],
             )
             summary["edges"] = cur.fetchone()[0]
+            # Unquoted identifiers are stored upper-case in the dictionary.
+            owner, _, name = graph_name.rpartition(".")
             cur.execute(
-                f"select count(*) from user_property_graphs "
-                f"where graph_name = :g",
-                g=graph_name,
+                "select count(*) from all_property_graphs "
+                "where graph_name = :g and owner = nvl(:o, user)",
+                g=name.upper(), o=owner.upper() or None,
             )
             summary["property_graph"] = cur.fetchone()[0] > 0
     except Exception as exc:  # pragma: no cover - depends on live DB

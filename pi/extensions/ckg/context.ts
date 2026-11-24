@@ -75,12 +75,13 @@ export async function buildMap(
   hooks?: BuildHooks,
 ): Promise<string | null> {
   try {
-    const settings = loadSettings();
-    if (!settings.inject) return null;
-    if (settings.keywordGate && !isCodingPrompt(prompt)) return null;
-
     const project = detectProject(cwd);
     if (!project) return null;
+
+    // Project-level .ckg/pi.json must be honoured (opt-out per project).
+    const settings = loadSettings(project.root);
+    if (!settings.inject) return null;
+    if (settings.keywordGate && !isCodingPrompt(prompt)) return null;
 
     const cli = state.cli ?? discoverCli();
     if (!cli) return null;
@@ -106,7 +107,7 @@ export async function buildMap(
     hooks?.onInjectStart?.();
     const result = await runCli(
       cli,
-      ["inject", prompt, "--root", project.root],
+      ["inject", "--root", project.root, "--", prompt], // "--": prompt may start with "-"
       { timeoutMs: settings.injectTimeoutMs, cwd: project.root },
     );
     if (result.code !== 0) return null;

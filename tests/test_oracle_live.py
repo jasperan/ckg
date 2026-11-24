@@ -319,3 +319,20 @@ class TestExistingGraphData:
                 assert len(loaded["edges"]) > 0
         except Exception:
             pytest.skip("No existing graph data found")
+
+
+@_LIVE
+class TestOracleSummary:
+    def test_summary_reports_stored_graph_and_property_graph(self, loaded_domain, monkeypatch):
+        from ckg.storage.connection import oracle_summary
+
+        monkeypatch.setenv("CKG_ORACLE_DSN", DSN)
+        monkeypatch.setenv("CKG_ORACLE_USER", USER)
+        monkeypatch.setenv("CKG_ORACLE_PASSWORD", PASSWORD)
+        monkeypatch.setenv("CKG_ORACLE_DOMAIN", loaded_domain)
+        summary = oracle_summary()
+        assert summary["connected"] is True
+        assert summary["nodes"] == 4
+        assert summary["edges"] == 5
+        # Oracle stores the unquoted graph name upper-cased; status must still find it.
+        assert summary["property_graph"] is True

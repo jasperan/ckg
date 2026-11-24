@@ -9,7 +9,8 @@ receive in their system prompt.
 from __future__ import annotations
 
 import ast
-from collections import defaultdict
+from functools import lru_cache
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -86,6 +87,36 @@ class CodeGraph:
         )
 
 
+@lru_cache(maxsize=64)
+def _parse_source(path: str, mtime_ns: int) -> ast.Module | None:
+    """Parse a file once for all of its nodes; None when unreadable/invalid."""
+    try:
+        return ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
+    except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
+        return None
+
+
+def _load_module(fp: Path) -> ast.Module | None:
+    try:
+        return _parse_source(str(fp), fp.stat().st_mtime_ns)
+    except OSError:
+        return None
+
+
+def build_graph(tree: Path, *, pkg_root: str) -> dict:
+    """Parse ``tree`` and enrich every node's text from source.
+
+    The single entry point used by ``ckg build``/``ckg load`` and the plugin's
+    on-demand cache build, so all graph caches carry the same node text.
+    """
+    from ckg.graph.parser import parse_tree
+
+    graph = parse_tree(tree, pkg_root=pkg_root)
+    for node in graph["nodes"].values():
+        enrich_node_text(Path(tree), node, pkg_root)
+    return graph
+
+
 def enrich_node_text(tree: Path, node: dict, pkg_root: str) -> dict:
     """Enrich a node's text with source-code evidence.
 
@@ -98,13 +129,9 @@ def enrich_node_text(tree: Path, node: dict, pkg_root: str) -> dict:
     if kind == "file":
         file_rel = nid.removeprefix("file:")
         fp = tree / file_rel
-        if not fp.exists():
+        mod = _load_module(fp)
+        if mod is None:
             return node
-        try:
-            source = fp.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return node
-        mod = ast.parse(source, filename=str(fp))
         extras: list[str] = []
         # Docstring
         if (isinstance(mod, ast.Module) and mod.body
@@ -132,13 +159,9 @@ def enrich_node_text(tree: Path, node: dict, pkg_root: str) -> dict:
             return node
         file_rel, qualname = parts
         fp = tree / file_rel
-        if not fp.exists():
+        mod = _load_module(fp)
+        if mod is None:
             return node
-        try:
-            source = fp.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return node
-        mod = ast.parse(source, filename=str(fp))
         # Walk to find the function/class
         sym_node = _find_symbol(mod, qualname)
         if sym_node is None:
@@ -162,13 +185,40 @@ def enrich_node_text(tree: Path, node: dict, pkg_root: str) -> dict:
 
 
 def _find_symbol(tree_node: ast.AST, qualname: str) -> ast.AST | None:
-    """Find a named symbol (func or class) in an AST module."""
-    parts = qualname.split(".")
-    for node in ast.walk(tree_node):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if node.name == parts[-1]:
-                return node
-    return None
+    """Find a top-level function/class or ``Class.method`` in an AST module."""
+    scope = getattr(tree_node, "body", [])
+    found: ast.AST | None = None
+    for part in qualname.split("."):
+        found = next(
+            (n for n in scope
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+             and n.name == part),
+            None,
+        )
+        if found is None:
+            return None
+        scope = getattr(found, "body", [])
+    return found
+
+
+def _file_reach(graph: CodeGraph, file_id: str) -> list[tuple[str, str]]:
+    """(neighbor_file_id, edge_kind) for a file, lifting symbol call edges.
+
+    Call edges connect symbols, so a call from a symbol in file A to a symbol
+    in file B (in either direction) counts as an A–B connection.
+    """
+    out: list[tuple[str, str]] = []
+    for nbr, kind, _direction in graph.neighbors(file_id):
+        if nbr.startswith("file:"):
+            out.append((nbr, kind))
+        elif kind == "contains":
+            for sym_nbr, sym_kind, _d in graph.neighbors(nbr):
+                if sym_kind != "call" or not sym_nbr.startswith("sym:"):
+                    continue
+                other = "file:" + sym_nbr.removeprefix("sym:").split("::", 1)[0]
+                if other != file_id:
+                    out.append((other, "call"))
+    return out
 
 
 _KIND_LABEL: dict[str, str] = {
@@ -217,16 +267,13 @@ def render_structure_map(
     seen: set[str] = set(anchors)
 
     # BFS from anchors
-    from collections import deque
     queue = deque((a, 0) for a in anchors)
     reach: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
     while queue:
         current, depth = queue.popleft()
         if depth >= hops:
             continue
-        for nbr, kind, direction in graph.neighbors(current):
-            if not nbr.startswith("file:"):
-                continue
+        for nbr, kind in _file_reach(graph, current):
             if nbr in anchor_set:
                 continue
             if nbr not in seen:
@@ -266,7 +313,7 @@ def render_structure_map(
             node = graph.node(file_id)
             label = _render_text(node["text"], _MAP_LABEL_MAX) if node else rel
             kinds = sorted({_KIND_LABEL.get(k, k) for _, k, _ in sources})
-            via = sorted({s[1] for s in sources})  # via which nodes
+            via = sorted({src for src, _, _ in sources})  # via which files
             via_display = ", ".join(
                 _render_text(v.removeprefix("file:"), _MAP_PATH_MAX) for v in via[:3]
             )

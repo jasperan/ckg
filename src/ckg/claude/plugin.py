@@ -70,11 +70,13 @@ def build_context_map(
             graph = json.loads(graph_path.read_text())
         except (json.JSONDecodeError, OSError):
             pass
+        if not (isinstance(graph, dict) and isinstance(graph.get("nodes"), dict)):
+            graph = None  # unreadable or not a ckg graph → rebuild
 
     if graph is None:
-        from ckg.graph.parser import parse_tree
+        from ckg.graph.builder import build_graph
         try:
-            graph = parse_tree(project_root, pkg_root=project_root.name)
+            graph = build_graph(project_root, pkg_root=project_root.name)
             cache_dir.mkdir(parents=True, exist_ok=True)
             graph_path.write_text(json.dumps(graph, indent=2))
         except (FileNotFoundError, OSError):
@@ -92,14 +94,18 @@ def build_context_map(
     from ckg.graph.builder import CodeGraph
     cg = CodeGraph.from_dict(graph)
 
-    # Extract anchors as file IDs — prefer the lexical seed anchors, which are
-    # the actual entry points (they may rank below symbols in the PPR results).
-    anchors = [a for a in results.get("anchors", []) if a.startswith("file:")][:5]
+    # Lexical anchors are the actual entry points. Symbol anchors are lifted
+    # to their containing file; with no lexical match there is nothing
+    # relevant to show, and an arbitrary hub-file map would be noise.
+    anchors: list[str] = []
+    for a in results.get("anchors", []):
+        if a.startswith("sym:"):
+            a = "file:" + a.removeprefix("sym:").split("::", 1)[0]
+        if a not in anchors:
+            anchors.append(a)
+    anchors = anchors[:5]
     if not anchors:
-        anchors = [r["node_id"] for r in results["results"]
-                   if r["node_id"].startswith("file:")][:5]
-    if not anchors and results["results"]:
-        anchors = [results["results"][0]["node_id"]]
+        return None
 
     from ckg.graph.builder import render_structure_map
     return render_structure_map(anchors, cg, query=query)

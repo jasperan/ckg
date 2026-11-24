@@ -148,3 +148,41 @@ class TestLabel:
 
     def test_symbol_with_class(self):
         assert _label("sym:models.py::OrderValidator.validate", {}) == "validate"
+
+
+class TestSeedStopwords:
+    def test_glue_words_do_not_anchor_every_node(self):
+        nodes = {
+            "file:a.py": {"id": "file:a.py", "text": "Module a.py in pkg."},
+            "file:b.py": {"id": "file:b.py", "text": "Module b.py in pkg."},
+            "file:rate.py": {"id": "file:rate.py", "text": "Module rate.py in pkg."},
+        }
+        seeds = seed_from_query("fix the bug in rate limiting", nodes, k=5)
+        assert list(seeds) == ["file:rate.py"]
+
+    def test_only_stopwords_matches_nothing(self):
+        nodes = {"file:a.py": {"id": "file:a.py", "text": "Module a.py in pkg."}}
+        assert seed_from_query("in the module", nodes) == {}
+
+
+class TestPprScale:
+    def test_large_sparse_graph_does_not_need_a_dense_matrix(self):
+        n = 60_000  # a dense n×n float64 matrix would be ~29 GB
+        graph = {
+            "nodes": {f"n{i}": {} for i in range(n)},
+            "edges": [{"src": f"n{i}", "dst": f"n{i + 1}", "kind": "call"} for i in range(n - 1)],
+        }
+        scores = personalized_pagerank(graph, {"n0": 1.0}, iters=5)
+        assert abs(sum(scores.values()) - 1.0) < 1e-9
+        assert scores["n0"] > scores["n1"] > scores["n2"] > 0
+
+
+class TestPgqFallback:
+    def test_pgq_error_with_empty_message_falls_back_to_memory(self, monkeypatch):
+        def boom(*a, **k):
+            raise RuntimeError()
+
+        monkeypatch.setattr("ckg.storage.oracle_pgq.match_neighborhood", boom)
+        result = hybrid_retrieve("email validation", MINI_GRAPH, mem=object(), domain="d")
+        assert result["method"].startswith("memory (pgq unavailable: RuntimeError")
+        assert result["results"]

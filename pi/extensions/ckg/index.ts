@@ -196,10 +196,11 @@ export default function (pi: ExtensionAPI) {
       hops: Type.Optional(Type.Number({ description: "Graph reach depth (default 2)" })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const args = ["query", params.query];
+      const args = ["query"];
       if (params.graph) args.push("--graph", resolvePath(params.graph, ctx));
       if (params.top_k) args.push("--top-k", String(params.top_k));
       if (params.hops) args.push("--hops", String(params.hops));
+      args.push("--", params.query); // "--": query may start with "-"
       return { content: [{ type: "text", text: await withActivity(ctx, "querying…", "query done", () => execCli(ctx, args)) }], details: {} };
     },
   });
@@ -215,8 +216,9 @@ export default function (pi: ExtensionAPI) {
       root: Type.Optional(Type.String({ description: "Project root (default: auto-detected)" })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const args = ["inject", params.query];
+      const args = ["inject"];
       if (params.root) args.push("--root", resolvePath(params.root, ctx));
+      args.push("--", params.query); // "--": query may start with "-"
       return { content: [{ type: "text", text: await withActivity(ctx, "injecting…", "map ready", () => execCli(ctx, args)) }], details: {} };
     },
   });
