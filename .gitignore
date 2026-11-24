@@ -30,6 +30,9 @@ ckg_data/
 # CKG caches
 .ckg/
 
+# Node (typecheck tooling for the pi extension)
+node_modules/
+
 # OMX state
 .omx/
 

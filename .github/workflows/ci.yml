@@ -5,32 +5,135 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  python:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12"]
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # co-edit tests and the smoke test read git history
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version-file: .python-version
+
+      - name: Lockfile is current
+        run: uv lock --check
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run --frozen ruff check src tests hooks benchmarks
+
+      - name: Type check
+        run: uv run --frozen mypy
 
       - name: Run tests
-        run: uv run pytest tests/ -q
+        run: uv run --frozen pytest tests/ -q
 
-      - name: Smoke-test CLI
+      - name: Build the wheel and run the installed CLI
         run: |
-          uv run ckg --help >/dev/null
-          cd tests/fixtures/sample_project && uv run ckg build sample_pkg --pkg-root sample_pkg --output /tmp/code_graph.json
-          uv run ckg query "connect to the database" --graph /tmp/code_graph.json | head -5
+          uv build --wheel
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install --quiet dist/*.whl
+          /tmp/wheel-venv/bin/ckg --version
+          /tmp/wheel-venv/bin/ckg build . --output /tmp/code_graph.json
+          /tmp/wheel-venv/bin/ckg query "personalized pagerank" --graph /tmp/code_graph.json --no-pgq \
+            | tee /dev/stderr | grep -q "pagerank.py"
+
+  versions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Every manifest carries the same version
+        run: |
+          expected="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/ckg/__init__.py)"
+          test -n "$expected"
+          for file in package.json .claude-plugin/plugin.json; do
+            actual="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$file")"
+            test "$actual" = "$expected" || { echo "$file: $actual != $expected"; exit 1; }
+          done
+          actual="$(python3 -c 'import json; print(json.load(open(".claude-plugin/marketplace.json"))["metadata"]["version"])')"
+          test "$actual" = "$expected" || { echo "marketplace.json: $actual != $expected"; exit 1; }
+
+  pi-extension:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Package contents
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          python3 - <<'EOF'
+          import json
+          files = {f["path"] for f in json.load(open("/tmp/pack.json"))[0]["files"]}
+          required = {
+              "pi/extensions/ckg/index.ts", "skills/ckg/SKILL.md", "skills/ckg-pi/SKILL.md",
+              "hooks/before_prompt.py", "scripts/postinstall.js", "pyproject.toml", "uv.lock",
+              "src/ckg/__init__.py", ".claude-plugin/plugin.json", "commands/ckg-status.md",
+          }
+          missing = required - files
+          leaked = {f for f in files if f.startswith(("tests/", "node_modules/", ".venv/", "benchmarks/"))
+                    or "__pycache__" in f}
+          assert not missing, f"missing from the package: {sorted(missing)}"
+          assert not leaked, f"must not be packaged: {sorted(leaked)[:10]}"
+          EOF
+
+  oracle:
+    # The live-database suite needs a ~1.5 GB image; run it on demand.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      oracle:
+        image: gvenzl/oracle-free:latest-faststart
+        env:
+          ORACLE_PASSWORD: ci_only_password
+          APP_USER: dmuser
+          APP_USER_PASSWORD: continual_learning
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd healthcheck.sh
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - run: uv sync --frozen
+      - name: Live Oracle tests
+        env:
+          CKG_ORACLE_LIVE: "1"
+          CKG_ORACLE_DSN: localhost:1521/FREEPDB1
+        run: uv run --frozen pytest tests/test_oracle_live.py -q
