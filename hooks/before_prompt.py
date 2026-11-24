@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """CKG Claude Code UserPromptSubmit hook — transparent structure-map injection.
 
-Reads the Claude Code hook payload from stdin (JSON with "prompt", "cwd"),
-and — when inside a project with a cached code graph — appends a compact
-structure map to the prompt context via hookSpecificOutput.additionalContext.
+Reads the Claude Code hook payload from stdin (JSON with "prompt", "cwd") and,
+for coding prompts inside a project, adds a compact structure map to the
+prompt context.
 
 Design constraints:
-  - Never blocks the agent loop: 8s hard timeout, everything best-effort.
+  - Never blocks the agent loop: 8s hard timeout, and the graph is never
+    built inside the hook. The first coding prompt in a project starts a
+    background build; the map appears once that has finished.
   - Never crashes: any failure emits an empty hook output.
   - Keyword-gated and toggleable (CKG_INJECT=0 / .ckg/pi.json) so non-coding
     prompts and opt-outs pay nothing.
@@ -15,11 +17,13 @@ Design constraints:
 
 Claude Code hook protocol:
   input:  {"prompt": "...", "cwd": "...", ...} on stdin
-  output: {"hookSpecificOutput": {"additionalContext": "..."}} to stdout
+  output: {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                  "additionalContext": "..."}} on stdout
 """
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -30,10 +34,9 @@ TIMEOUT_SECONDS = 8
 PREAMBLE = """## Code Knowledge Graph (CKG) — Structure-Aware Context
 
 A dependency graph of this codebase (imports, function calls, git co-edits) was
-parsed and stored in Oracle PGQ / local cache. The structure map below shows the
-*dependency cluster* for this task. Changing one file in the cluster often
-requires changing its neighbors — start exploration there instead of searching
-the whole filesystem."""
+parsed ahead of time. The structure map below shows the *dependency cluster*
+for this task. Changing one file in the cluster often requires changing its
+neighbors — start exploration there instead of searching the whole filesystem."""
 
 INSTALL_GUIDANCE = """## Code Knowledge Graph (CKG) — not installed
 
@@ -43,15 +46,23 @@ with one of:
     uv tool install git+https://github.com/jasperan/ckg.git
     pip install git+https://github.com/jasperan/ckg.git
 
-(uv tool install puts `ckg` on your PATH — then run `ckg build .` in this
-project to build the dependency graph.)"""
+(uv tool install puts `ckg` on your PATH. The dependency graph for a project
+is then built automatically on the first coding prompt.)"""
 
-# Lightweight mirror of the pi extension's keyword gate.
+# Same gate as the pi extension (pi/extensions/ckg/project.ts).
 CODING_KEYWORDS = (
     "implement", "add ", "fix", "change", "refactor", "build", "create",
     "modify", "update", "feature", "bug", "edit", "write", "debug", "deploy",
     "function", "class", "module", "import", "api", "endpoint",
     "test", "migrate", "upgrade", "rewrite", "optimize", "integrate",
+)
+CODING_PATTERNS = (
+    re.compile(
+        r"\b(implement|add|fix|change|refactor|build|create|modify|update|debug)\b.*"
+        r"\b(feature|bug|function|class|module|file|code|endpoint|api|test|support)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(write|edit)\b", re.IGNORECASE),
 )
 
 
@@ -59,12 +70,12 @@ def injection_enabled(project_root: Path) -> bool:
     """CKG_INJECT env > .ckg/pi.json > default on."""
     env = os.environ.get("CKG_INJECT")
     if env is not None:
-        return env not in ("0", "false", "False")
+        return env.strip().lower() not in ("0", "false", "off", "no")
     try:
         cfg_path = project_root / ".ckg" / "pi.json"
         if cfg_path.exists():
-            cfg = json.loads(cfg_path.read_text())
-            return bool(cfg.get("inject", True))
+            value = json.loads(cfg_path.read_text()).get("inject", True)
+            return value if isinstance(value, bool) else True
     except Exception:
         pass
     return True
@@ -72,19 +83,20 @@ def injection_enabled(project_root: Path) -> bool:
 
 def is_coding_prompt(prompt: str) -> bool:
     lower = prompt.lower()
-    hits = sum(1 for kw in CODING_KEYWORDS if kw in lower)
-    return hits >= 2
+    if sum(1 for kw in CODING_KEYWORDS if kw in lower) >= 2:
+        return True
+    return any(pattern.search(prompt) for pattern in CODING_PATTERNS)
 
 
 def detect_project(cwd: str) -> Path | None:
     """Walk upward looking for a project root (mirrors ckg.claude.plugin)."""
     p = Path(cwd)
+    home = Path.home()
     for parent in [p, *p.parents]:
-        if (parent / ".git").is_dir():
-            return parent
-        if (parent / "pyproject.toml").exists():
-            return parent
-        if (parent / "package.json").exists():
+        if parent == home or parent == parent.parent:
+            return None  # never treat $HOME or / as one project
+        # `.git` is a file in worktrees and submodules.
+        if any((parent / m).exists() for m in (".git", "pyproject.toml", "package.json")):
             return parent
     return None
 
@@ -110,72 +122,66 @@ def find_ckg() -> list[str] | None:
     return None
 
 
+def install_guidance_once(root: Path) -> str | None:
+    """The install hint the first time it is needed in a project, else None."""
+    marker = root / ".ckg" / ".hook-warned"
+    if marker.exists():
+        return None
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        ignore = marker.parent / ".gitignore"
+        if not ignore.exists():
+            ignore.write_text("*\n")
+        marker.write_text("1")
+    except OSError:
+        pass
+    return INSTALL_GUIDANCE
+
+
+def emit(context: str | None) -> int:
+    if not context:
+        print("{}")
+        return 0
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": context,
+        }
+    }))
+    return 0
+
+
 def main() -> int:
     try:
         raw = sys.stdin.read() if not sys.stdin.isatty() else ""
         payload = json.loads(raw) if raw.strip() else {}
-        prompt = str(payload.get("prompt", ""))[:MAX_QUERY_CHARS]
+        raw_prompt = str(payload.get("prompt", ""))
         cwd = str(payload.get("cwd") or os.getcwd())
-        if not prompt.strip():
-            print("{}")
-            return 0
+        if not raw_prompt.strip():
+            return emit(None)
 
         root = detect_project(cwd)
-        if root is None:
-            print("{}")
-            return 0
-        if not injection_enabled(root):
-            print("{}")
-            return 0
-        if not is_coding_prompt(prompt):
-            print("{}")
-            return 0
-
-        graph_cache = root / ".ckg" / "code_graph.json"
-        if not graph_cache.exists():
-            print("{}")  # background build happens via the skill / CLI
-            return 0
+        if root is None or not injection_enabled(root) or not is_coding_prompt(raw_prompt):
+            return emit(None)
 
         cmd = find_ckg()
         if cmd is None:
-            # Emit one-time install guidance so the plugin never silently no-ops.
-            marker = root / ".ckg" / ".hook-warned"
-            if marker.exists():
-                print("{}")
-                return 0
-            try:
-                marker.parent.mkdir(parents=True, exist_ok=True)
-                marker.write_text("1")
-            except Exception:
-                pass
-            out = {"hookSpecificOutput": {"additionalContext": INSTALL_GUIDANCE}}
-            print(json.dumps(out))
-            return 0
+            return emit(install_guidance_once(root))
 
+        prompt = " ".join(raw_prompt.split())[:MAX_QUERY_CHARS]
         proc = subprocess.run(
-            [*cmd, "inject", "--root", str(root), "--", prompt],  # "--": prompt may start with "-"
+            # "--": the prompt may start with "-". "--refresh background": a
+            # missing graph is built by a detached process, not here.
+            [*cmd, "inject", "--root", str(root), "--refresh", "background", "--", prompt],
             capture_output=True,
             text=True,
             timeout=TIMEOUT_SECONDS,
             cwd=cwd,
-            env={**os.environ, "CKG_NONINTERACTIVE": "1"},
         )
-        if proc.returncode != 0:
-            print("{}")
-            return 0
-
-        structure_map = proc.stdout.strip()
-        if not structure_map:
-            print("{}")
-            return 0
-
-        context = f"{PREAMBLE}\n\n{structure_map}"
-        out = {"hookSpecificOutput": {"additionalContext": context}}
-        print(json.dumps(out))
-        return 0
+        structure_map = proc.stdout.strip() if proc.returncode == 0 else ""
+        return emit(f"{PREAMBLE}\n\n{structure_map}" if structure_map else None)
     except Exception:
-        print("{}")
-        return 0
+        return emit(None)
 
 
 if __name__ == "__main__":

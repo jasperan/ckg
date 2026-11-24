@@ -1,23 +1,22 @@
-"""Hybrid retrieval — lexical anchors → graph reach.
+"""Hybrid retrieval — lexical anchors → graph reach → structural ranking.
 
-The CKG core retrieval algorithm. Combines:
-
-1. Lexical seed selection — token overlap between query and node labels
-2. Graph neighborhood match — PGQ or in-memory traversal from seeds
-3. Personalized PageRank ranking — structural importance scoring
-
-This is the algorithm verified across 7 real httpie PRs:
-  - Lexical-only gold recall: 0.20
-  - Hybrid gold recall: 0.72 (+0.52)
+1. Lexical seed selection — which nodes the query names (``lexical``)
+2. Graph neighbourhood — nodes within a few hops of the seeds, matched by
+   Oracle PGQ when a database is configured, in memory otherwise
+3. Personalized PageRank over that neighbourhood (``pagerank``)
 
 Usage:
     from ckg.retrieval import hybrid_retrieve
-    results = hybrid_retrieve(query, graph, mem=agent_memory, domain="my_project")
+    results = hybrid_retrieve(query, graph)
 """
 
 from __future__ import annotations
 
-from ckg.retrieval.pagerank import personalized_pagerank, seed_from_query
+import re
+from collections import deque
+
+from ckg.retrieval.lexical import seed_from_query
+from ckg.retrieval.pagerank import personalized_pagerank
 
 
 def hybrid_retrieve(
@@ -33,136 +32,126 @@ def hybrid_retrieve(
 ) -> dict:
     """Run the full hybrid retrieval pipeline.
 
-    Pipeline:
-      1. Lexical anchors: token-overlap seeds from node labels
-      2. Graph neighborhood: PGQ match (preferred) or in-memory BFS
-      3. Personalized PageRank: structural ranking over the neighborhood
-
     Args:
         query: Feature description or retrieval query.
-        graph: Parsed code graph dict with "nodes" and "edges".
-        mem: Optional AgentMemory with live Oracle connection (for PGQ).
+        graph: Graph dict with "nodes" and "edges" (and optionally the "lex"
+            index written by ``build_graph``).
+        mem: Optional live Oracle handle (``connect_pgq``) for PGQ matching.
         domain: Domain for PGQ scoping (required if mem is provided).
-        k_anchor: Maximum number of lexical anchor seeds (default 5).
-        hops: Graph reach depth (default 2).
+        k_anchor: Maximum number of lexical anchor seeds.
+        hops: Graph reach depth.
         top_k: Number of top results to return.
         graph_name: Oracle PGQ property graph name.
 
     Returns:
         dict with:
-          - results: list of {node_id, score, text}
-          - anchors: list of anchor node IDs
-          - anchor_labels: anchor file names
-          - method: "pgq" or "memory"
+          - results: list of {node_id, score, text}, best first
+          - anchors: anchor node IDs, strongest match first
+          - anchor_labels: short display names of the anchors
+          - file_scores: {file_id: score} for every file in the neighbourhood
+            (a file's own score plus that of its symbols)
+          - method: "pgq", "memory", or "memory (...)" with the reason PGQ was
+            not used
+
+    A query that names nothing in the graph returns no results: without an
+    anchor there is nothing to rank against.
     """
     nodes = graph.get("nodes", {})
-
-    # Step 1 — lexical anchors
-    seeds = seed_from_query(query, nodes, k=k_anchor)
-    anchors = list(seeds.keys())
-
-    # Step 2 — graph neighborhood
-    neighborhood: dict[str, dict] = {}
-
-    if mem is not None and domain is not None:
-        # PGQ path — match neighborhood in the database
-        try:
-            from ckg.storage.oracle_pgq import match_neighborhood
-            neighbors: set[str] = set(anchors)
-            for anchor in anchors:
-                matched = match_neighborhood(
-                    mem, anchor=anchor, domain=domain,
-                    hops=hops, graph_name=graph_name,
-                )
-                for row in matched:
-                    neighbors.add(row["neighbor"])
-            # Build subgraph from matched nodes
-            subgraph_nodes = {
-                nid: nodes.get(nid, {"id": nid, "text": nid})
-                for nid in neighbors if nid in nodes
-            }
-            # Filter edges to those in the neighborhood
-            subgraph_edges = [
-                e for e in graph.get("edges", [])
-                if e["src"] in neighbors and e["dst"] in neighbors
-            ]
-            neighborhood = {"nodes": subgraph_nodes, "edges": subgraph_edges}
-            method = "pgq"
-        except Exception as exc:  # PGQ unavailable — fall back to in-memory
-            import re as _re
-            m = _re.search(r"ORA-\d+: ([^\n]+)", str(exc))
-            hint = (m.group(1).strip() if m else (str(exc).splitlines() or [type(exc).__name__])[0])[:60]
-            method = f"memory (pgq unavailable: {hint}; run 'ckg load' to store the graph)"
-            neighborhood = _memory_neighborhood(graph, anchors, hops=hops)
-    else:
-        method = "memory"
-        neighborhood = _memory_neighborhood(graph, anchors, hops=hops)
-
-    if not neighborhood.get("nodes"):
-        # No neighborhood found — return just anchors with PPR over full graph
-        scored = personalized_pagerank(graph, seeds)
-        results = [
-            {"node_id": nid, "score": round(score, 4),
-             "text": nodes.get(nid, {}).get("text", nid)}
-            for nid, score in sorted(scored.items(), key=lambda x: -x[1])[:top_k]
-        ]
+    seeds = seed_from_query(query, nodes, k=k_anchor, index=graph.get("lex"))
+    anchors = list(seeds)
+    method = "memory"
+    if not seeds:
         return {
-            "results": results,
-            "anchors": anchors,
-            "anchor_labels": [_label(nid, nodes) for nid in anchors],
-            "method": f"{method} (empty neighborhood)",
+            "results": [], "anchors": [], "anchor_labels": [], "file_scores": {},
+            "method": f"{method} (no lexical match)",
         }
 
-    # Step 3 — Personalized PageRank over the neighborhood subgraph
+    neighborhood: dict | None = None
+    if mem is not None and domain is not None:
+        try:
+            from ckg.storage.oracle_pgq import match_neighborhood_bulk
+
+            matched = match_neighborhood_bulk(
+                mem, anchors=anchors, domain=domain, hops=hops, graph_name=graph_name,
+            )
+            keep = set(anchors) | {row["neighbor"] for row in matched}
+            neighborhood = _subgraph(graph, keep)
+            method = "pgq"
+        except Exception as exc:  # PGQ unavailable — fall back to in-memory
+            method = f"memory (pgq unavailable: {_reason(exc)})"
+    if neighborhood is None:
+        neighborhood = _memory_neighborhood(graph, anchors, hops=hops)
+
     scored = personalized_pagerank(neighborhood, seeds)
-    results = [
-        {"node_id": nid, "score": round(score, 4),
-         "text": nodes.get(nid, {}).get("text", nid)}
-        for nid, score in sorted(scored.items(), key=lambda x: -x[1])[:top_k]
-    ]
+    ranked = sorted(scored.items(), key=lambda kv: (-kv[1], kv[0]))
+    file_scores: dict[str, float] = {}
+    for nid, score in ranked:
+        file_id = _file_of(nid)
+        file_scores[file_id] = file_scores.get(file_id, 0.0) + score
 
     return {
-        "results": results,
+        "results": [
+            {"node_id": nid, "score": round(score, 4), "text": nodes.get(nid, {}).get("text", nid)}
+            for nid, score in ranked[: max(top_k, 0)]
+        ],
         "anchors": anchors,
         "anchor_labels": [_label(nid, nodes) for nid in anchors],
+        "file_scores": file_scores,
         "method": method,
     }
 
 
-def _memory_neighborhood(graph: dict, seeds: list[str], *, hops: int = 2) -> dict:
-    """Build a neighborhood subgraph via in-memory BFS from seeds."""
-    from collections import deque
+def _reason(exc: Exception) -> str:
+    """One short line saying why PGQ was not used, with a hint when the cause
+    is a missing graph rather than a missing database."""
+    text = str(exc)
+    ora = re.search(r"ORA-(\d+): ([^\n]+)", text)
+    if ora:
+        hint = ora.group(2).strip()[:60]
+        if ora.group(1) in ("00942", "40434", "00904"):  # table / graph / column missing
+            return f"{hint}; run 'ckg load' to store the graph"
+        return hint
+    return ((text.splitlines() or [type(exc).__name__])[0] or type(exc).__name__)[:60]
 
+
+def _file_of(node_id: str) -> str:
+    if node_id.startswith("sym:"):
+        return "file:" + node_id[4:].split("::", 1)[0]
+    return node_id
+
+
+def _subgraph(graph: dict, keep: set[str]) -> dict:
     nodes = graph.get("nodes", {})
-    edges = graph.get("edges", [])
+    return {
+        "nodes": {nid: nodes[nid] for nid in sorted(keep) if nid in nodes},
+        "edges": [
+            e for e in graph.get("edges", [])
+            if e["src"] in keep and e["dst"] in keep
+        ],
+    }
 
-    # Build adjacency
-    adj: dict[str, set[str]] = {nid: set() for nid in nodes}
-    for e in edges:
+
+def _memory_neighborhood(graph: dict, seeds: list[str], *, hops: int = 2) -> dict:
+    """Subgraph within ``hops`` edges of the seeds, ignoring edge direction."""
+    nodes = graph.get("nodes", {})
+    adj: dict[str, list[str]] = {}
+    for e in graph.get("edges", []):
         src, dst = e["src"], e["dst"]
-        if src in adj:
-            adj[src].add(dst)
-        if dst in adj:
-            adj[dst].add(src)
+        if src in nodes and dst in nodes:
+            adj.setdefault(src, []).append(dst)
+            adj.setdefault(dst, []).append(src)
 
-    # BFS
-    visited: set[str] = set(seeds)
-    queue = deque((s, 0) for s in seeds if s in adj)
+    visited: set[str] = {s for s in seeds if s in nodes}
+    queue = deque((s, 0) for s in seeds if s in nodes)
     while queue:
         current, depth = queue.popleft()
         if depth >= hops:
             continue
-        for nbr in adj.get(current, set()):
+        for nbr in adj.get(current, ()):
             if nbr not in visited:
                 visited.add(nbr)
                 queue.append((nbr, depth + 1))
-
-    sub_nodes = {nid: nodes.get(nid, {"id": nid, "text": nid}) for nid in visited}
-    sub_edges = [
-        e for e in edges
-        if e["src"] in visited and e["dst"] in visited
-    ]
-    return {"nodes": sub_nodes, "edges": sub_edges}
+    return _subgraph(graph, visited)
 
 
 def _label(node_id: str, nodes: dict) -> str:

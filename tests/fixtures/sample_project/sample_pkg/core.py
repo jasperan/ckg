@@ -4,8 +4,8 @@ Core business logic for a fictional order-processing system.
 Demonstrates cross-module imports, function calls, and co-editable files.
 """
 
-from sample_pkg.utils.helpers import validate_email, format_price
 from sample_pkg.utils.db import connect_db, query_db
+from sample_pkg.utils.helpers import format_price, validate_email
 
 
 def process_order(customer_email: str, items: list[dict]) -> dict:
@@ -53,24 +53,3 @@ class OrderValidator:
     def get_remaining_capacity(self, items: list[dict]) -> int:
         """Return how many more items can be added."""
         return self.MAX_ITEMS - len(items)
-# add a comment
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py

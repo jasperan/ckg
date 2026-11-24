@@ -1,16 +1,13 @@
 """Oracle SQL/PGQ property graph for code graph storage and traversal.
 
-Creates a property graph over MEMORY_GRAPH_NODES / MEMORY_GRAPH_EDGES (relational
-tables keyed on (id, domain) and (src, dst, kind, domain)) so dependency
-neighborhoods are matched entirely in the database with GRAPH_TABLE ... MATCH.
+The graph lives in two relational tables, ``<PREFIX>_NODES`` keyed on
+(id, domain) and ``<PREFIX>_EDGES`` keyed on (src, dst, kind, domain), with a
+SQL property graph defined over them so dependency neighbourhoods are matched
+in the database with ``GRAPH_TABLE ... MATCH``. A *domain* scopes one stored
+graph, so several projects share the same tables.
 
-This is the *traversal/match* half of structure-aware retrieval. Ranking
-(Personalized PageRank) still runs in Python over the matched neighborhood —
-PGQ finds the structural edges; Python scores them.
-
-Supports two operation modes:
-  Live Oracle PGQ  — GRAPH_TABLE MATCH with quantified paths
-  Offline fallback — in-memory traversal from a loaded graph dict
+This is the traversal half of retrieval. Ranking (Personalized PageRank)
+runs in Python over the matched neighbourhood.
 """
 
 from __future__ import annotations
@@ -18,11 +15,29 @@ from __future__ import annotations
 import re
 
 DEFAULT_GRAPH_NAME = "ckg_code_graph"
+DEFAULT_TABLE_PREFIX = "MEMORY_GRAPH"
 
-_IDENTIFIER_PART = r"[A-Za-z_][A-Za-z0-9_$#]*"
+_IDENTIFIER_PART = r"[A-Za-z][A-Za-z0-9_$#]*"
 _IDENTIFIER_RE = re.compile(_IDENTIFIER_PART + r"\Z")
 _QUALIFIED_IDENTIFIER_RE = re.compile(_IDENTIFIER_PART + r"(?:\." + _IDENTIFIER_PART + r")?\Z")
 _IDENTIFIER_MAX = 128
+# Reserved words that are plausible as a graph name or prefix and would turn
+# the DDL below into a syntax error instead of a clear message.
+_RESERVED = frozenset({
+    "ALL", "AND", "AS", "BY", "CREATE", "DELETE", "DROP", "FOR", "FROM", "GRANT",
+    "GROUP", "IN", "INDEX", "INSERT", "INTO", "IS", "NOT", "NULL", "OF", "ON",
+    "OR", "ORDER", "SELECT", "SET", "TABLE", "TO", "UNION", "UPDATE", "USER",
+    "VALUES", "VIEW", "WHERE", "WITH",
+})
+
+# Column sizes of the node/edge tables (bytes).
+_ID_MAX_BYTES = 256
+_DOMAIN_MAX_BYTES = 32
+_KIND_MAX_BYTES = 32
+
+_BATCH_ROWS = 1000
+# Oracle caps an IN list at 1000 expressions.
+_IN_LIST_MAX = 500
 
 
 def require_identifier(value: str, *, kind: str, allow_qualified: bool = False) -> str:
@@ -39,36 +54,96 @@ def require_identifier(value: str, *, kind: str, allow_qualified: bool = False) 
         not isinstance(value, str)
         or not pattern.fullmatch(value)
         or len(value) > _IDENTIFIER_MAX
+        or any(part.upper() in _RESERVED for part in value.split("."))
     ):
         raise ValueError(f"invalid Oracle {kind}: {value!r}")
     return value
 
 
+def _tables(table_prefix: str) -> tuple[str, str]:
+    prefix = require_identifier(table_prefix, kind="table prefix")
+    nodes, edges = f"{prefix}_NODES", f"{prefix}_EDGES"
+    if len(nodes) > _IDENTIFIER_MAX:
+        raise ValueError(f"invalid Oracle table prefix: {table_prefix!r}")
+    return nodes, edges
+
+
+def _require_domain(domain: str) -> str:
+    if not isinstance(domain, str) or not domain or len(domain.encode()) > _DOMAIN_MAX_BYTES:
+        raise ValueError(
+            f"invalid domain {domain!r}: must be 1..{_DOMAIN_MAX_BYTES} bytes"
+        )
+    return domain
+
+
+def _require_pool(mem):
+    pool = getattr(mem, "_pool", None)
+    if pool is None:
+        raise RuntimeError("Oracle PGQ requires a live Oracle connection pool")
+    return pool
+
+
 # --------------------------------------------------------------------------- #
-# Oracle PGQ (live database)
+# Schema
 # --------------------------------------------------------------------------- #
+
+def ensure_schema(mem, *, table_prefix: str = DEFAULT_TABLE_PREFIX) -> None:
+    """Create the node and edge tables when they do not exist yet, and add
+    the edge ``weight`` column to an edge table created without one."""
+    nodes_table, edges_table = _tables(table_prefix)
+    pool = _require_pool(mem)
+    ddl = {
+        nodes_table: f"""
+            CREATE TABLE {nodes_table} (
+              id         VARCHAR2({_ID_MAX_BYTES} BYTE) NOT NULL,
+              domain     VARCHAR2({_DOMAIN_MAX_BYTES} BYTE) NOT NULL,
+              text       CLOB,
+              updated_ts TIMESTAMP DEFAULT SYSTIMESTAMP,
+              PRIMARY KEY (id, domain)
+            )""",
+        edges_table: f"""
+            CREATE TABLE {edges_table} (
+              src        VARCHAR2({_ID_MAX_BYTES} BYTE) NOT NULL,
+              dst        VARCHAR2({_ID_MAX_BYTES} BYTE) NOT NULL,
+              kind       VARCHAR2({_KIND_MAX_BYTES} BYTE) NOT NULL,
+              weight     NUMBER DEFAULT 1,
+              domain     VARCHAR2({_DOMAIN_MAX_BYTES} BYTE) NOT NULL,
+              updated_ts TIMESTAMP DEFAULT SYSTIMESTAMP,
+              PRIMARY KEY (src, dst, kind, domain)
+            )""",
+    }
+    with pool.acquire() as conn:
+        cur = conn.cursor()
+        for table, statement in ddl.items():
+            cur.execute(
+                "SELECT COUNT(*) FROM user_tables WHERE table_name = :t", t=table.upper()
+            )
+            if cur.fetchone()[0] == 0:
+                cur.execute(statement)
+        cur.execute(
+            "SELECT COUNT(*) FROM user_tab_columns "
+            "WHERE table_name = :t AND column_name = 'WEIGHT'",
+            t=edges_table.upper(),
+        )
+        if cur.fetchone()[0] == 0:
+            cur.execute(f"ALTER TABLE {edges_table} ADD (weight NUMBER DEFAULT 1)")
+
 
 def create_property_graph(
-    mem, *, graph_name: str = DEFAULT_GRAPH_NAME, table_prefix: str = "MEMORY_GRAPH"
+    mem, *, graph_name: str = DEFAULT_GRAPH_NAME, table_prefix: str = DEFAULT_TABLE_PREFIX
 ) -> None:
-    """(Re)create the Oracle SQL property graph.
+    """Create the SQL property graph over the node/edge tables, replacing an
+    existing definition of the same name.
 
-    Idempotent: drops an existing graph of the same name first. Exposes (id,
-    domain) as vertex key and (src, dst, kind, domain) as edge key, with domain
-    as a property on both so queries can scope to a single graphify snapshot.
-
-    Args:
-        mem: An AgentMemory instance with a live Oracle connection pool.
-        graph_name: Property graph name in the database.
-        table_prefix: Prefix for the node/edge tables.
+    (id, domain) is the vertex key and (src, dst, kind, domain) the edge key,
+    with domain exposed as a property on both so queries can scope to one
+    stored graph.
     """
     graph_name = require_identifier(graph_name, kind="graph name", allow_qualified=True)
-    table_prefix = require_identifier(table_prefix, kind="table prefix")
+    nodes_table, edges_table = _tables(table_prefix)
     pool = _require_pool(mem)
-    nodes_table = f"{table_prefix}_NODES"
-    edges_table = f"{table_prefix}_EDGES"
     ddl = f"""
-        CREATE PROPERTY GRAPH {graph_name}
+        CREATE OR REPLACE PROPERTY GRAPH {graph_name}
           VERTEX TABLES (
             {nodes_table}
               KEY (id, domain)
@@ -83,166 +158,159 @@ def create_property_graph(
           )
     """
     with pool.acquire() as conn:
+        conn.cursor().execute(ddl)
+
+
+# --------------------------------------------------------------------------- #
+# Store / load
+# --------------------------------------------------------------------------- #
+
+def _fits(value: str) -> bool:
+    return len(value.encode()) <= _ID_MAX_BYTES
+
+
+def replace_domain_graph(
+    mem,
+    nodes: list[dict],
+    edges: list[dict],
+    *,
+    domain: str,
+    table_prefix: str = DEFAULT_TABLE_PREFIX,
+) -> tuple[int, int]:
+    """Make the domain's stored graph exactly ``nodes`` and ``edges``.
+
+    Runs as one transaction: rows of the domain that are not in the new graph
+    (deleted files, renamed symbols) disappear with the same commit that
+    stores the new ones, and a failure leaves the previous graph in place.
+    Other domains are not touched. Nodes whose id does not fit the id column,
+    and edges touching them, are left out.
+
+    Returns the number of (nodes, edges) stored.
+    """
+    nodes_table, edges_table = _tables(table_prefix)
+    domain = _require_domain(domain)
+    pool = _require_pool(mem)
+
+    node_rows = {
+        n["id"]: (n["id"], domain, n.get("text", ""))
+        for n in nodes
+        if _fits(n["id"])
+    }
+    edge_rows = {
+        (e["src"], e["dst"], e["kind"]): (
+            e["src"], e["dst"], e["kind"], float(e.get("weight", 1)), domain,
+        )
+        for e in edges
+        if e["src"] in node_rows and e["dst"] in node_rows
+        and len(e["kind"].encode()) <= _KIND_MAX_BYTES
+    }
+
+    with pool.acquire() as conn:
         cur = conn.cursor()
         try:
-            cur.execute(f"DROP PROPERTY GRAPH {graph_name}")
-        except Exception:
-            pass  # First run: nothing to drop
-        cur.execute(ddl)
-        conn.commit()
+            cur.execute(f"DELETE FROM {edges_table} WHERE domain = :d", d=domain)
+            cur.execute(f"DELETE FROM {nodes_table} WHERE domain = :d", d=domain)
+            _insert_batches(
+                cur, f"INSERT INTO {nodes_table} (id, domain, text) VALUES (:1, :2, :3)",
+                list(node_rows.values()),
+            )
+            _insert_batches(
+                cur,
+                f"INSERT INTO {edges_table} (src, dst, kind, weight, domain) "
+                "VALUES (:1, :2, :3, :4, :5)",
+                list(edge_rows.values()),
+            )
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+    return len(node_rows), len(edge_rows)
 
 
-def match_neighborhood(
-    mem, *, anchor: str, domain: str,
-    hops: int = 2, graph_name: str = DEFAULT_GRAPH_NAME,
+def _insert_batches(cur, sql: str, rows: list[tuple]) -> None:
+    for start in range(0, len(rows), _BATCH_ROWS):
+        cur.executemany(sql, rows[start:start + _BATCH_ROWS])
+
+
+def load_graph(mem, *, domain: str, table_prefix: str = DEFAULT_TABLE_PREFIX) -> dict:
+    """Read a stored graph back as a graph dict (``ckg query`` uses it when
+    there is no local graph file)."""
+    nodes_table, edges_table = _tables(table_prefix)
+    pool = _require_pool(mem)
+    with pool.acquire() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, text FROM {nodes_table} WHERE domain = :d ORDER BY id", d=domain
+        )
+        nodes = {}
+        for nid, text in cur:
+            if text is not None and not isinstance(text, str):
+                text = text.read()  # CLOB locator
+            kind = "file" if nid.startswith("file:") else "sym" if nid.startswith("sym:") else "node"
+            nodes[nid] = {"id": nid, "kind": kind, "text": text or ""}
+        cur.execute(
+            f"SELECT src, dst, kind, weight FROM {edges_table} WHERE domain = :d "
+            "ORDER BY kind, src, dst",
+            d=domain,
+        )
+        edges = []
+        for src, dst, kind, weight in cur:
+            edge = {"src": src, "dst": dst, "kind": kind}
+            if weight is not None and weight != 1:
+                edge["weight"] = int(weight) if float(weight).is_integer() else float(weight)
+            edges.append(edge)
+    return {"nodes": nodes, "edges": edges}
+
+
+# --------------------------------------------------------------------------- #
+# Traversal
+# --------------------------------------------------------------------------- #
+
+def match_neighborhood_bulk(
+    mem,
+    *,
+    anchors: list[str],
+    domain: str,
+    hops: int = 2,
+    graph_name: str = DEFAULT_GRAPH_NAME,
 ) -> list[dict]:
-    """Match the 1..hops dependency neighborhood of anchor in domain.
+    """Nodes within ``hops`` edges of any anchor, in either edge direction.
 
-    Returns a list of {"neighbor": str, "hops": int} rows — distinct symbols
-    reachable within hops edges, found purely by the Oracle graph engine,
-    ordered by shortest reach.
+    Returns ``[{"neighbor": id, "hops": n}]`` with the shortest distance per
+    node, anchors excluded, ordered by (hops, neighbor). Dependencies matter
+    both ways — what an anchor uses and what uses it — so edges are matched
+    undirected. One statement runs per hop for all anchors together.
     """
     if hops < 1:
         raise ValueError("hops must be >= 1")
     graph_name = require_identifier(graph_name, kind="graph name", allow_qualified=True)
     pool = _require_pool(mem)
+    anchors = sorted(set(anchors))
+    if not anchors:
+        return []
+
     best: dict[str, int] = {}
+    anchor_set = set(anchors)
     with pool.acquire() as conn:
         cur = conn.cursor()
         for h in range(1, int(hops) + 1):
-            chain = "".join(f"-[]->(n{i})" for i in range(h - 1)) + "-[]->(w)"
-            sql = f"""
-                SELECT neighbor FROM GRAPH_TABLE ({graph_name}
-                  MATCH (v){chain}
-                  WHERE v.id = :anchor AND v.domain = :domain
-                  COLUMNS (w.id AS neighbor)
-                )
-            """
-            cur.execute(sql, {"anchor": anchor, "domain": domain})
-            for (nb,) in cur.fetchall():
-                if nb != anchor and (nb not in best or h < best[nb]):
-                    best[nb] = h
-    return [{"neighbor": nb, "hops": h}
-            for nb, h in sorted(best.items(), key=lambda kv: (kv[1], kv[0]))]
-
-
-def match_edges(
-    mem, *, anchor: str, domain: str,
-    graph_name: str = DEFAULT_GRAPH_NAME,
-) -> list[dict]:
-    """Match the 1-hop edges from ``anchor`` in ``domain``.
-
-    Returns a list of {"neighbor": str, "kind": str} rows — the direct
-    dependency edges (import, call, co_edit) so the caller can label each
-    connection by its edge type.
-    """
-    graph_name = require_identifier(graph_name, kind="graph name", allow_qualified=True)
-    pool = _require_pool(mem)
-    sql = f"""
-        SELECT neighbor, kind FROM GRAPH_TABLE ({graph_name}
-          MATCH (v) -[e]-> (w)
-          WHERE v.id = :anchor AND v.domain = :domain
-          COLUMNS (w.id AS neighbor, e.kind AS kind)
-        )
-    """
-    out: list[dict] = []
-    with pool.acquire() as conn:
-        cur = conn.cursor()
-        cur.execute(sql, {"anchor": anchor, "domain": domain})
-        for nb, kind in cur.fetchall():
-            out.append({"neighbor": nb, "kind": kind})
-    return out
-
-
-# --------------------------------------------------------------------------- #
-# Upsert helpers — load parsed graph into Oracle tables
-# --------------------------------------------------------------------------- #
-
-def upsert_graph_nodes(
-    mem, nodes: list[dict], *, domain: str, table_prefix: str = "MEMORY_GRAPH",
-) -> int:
-    """Insert or update graph nodes in Oracle.
-
-    Uses MERGE so re-runs are idempotent.
-    """
-    table_prefix = require_identifier(table_prefix, kind="table prefix")
-    pool = _require_pool(mem)
-    with pool.acquire() as conn:
-        cur = conn.cursor()
-        count = 0
-        for node in nodes:
-            nid = node["id"]
-            text = node.get("text", "")
-            cur.execute(
-                f"MERGE INTO {table_prefix}_NODES t "
-                "USING (SELECT :id AS id, :domain AS domain FROM DUAL) s "
-                "ON (t.id = s.id AND t.domain = s.domain) "
-                "WHEN MATCHED THEN UPDATE SET t.text = :text "
-                "WHEN NOT MATCHED THEN INSERT (id, domain, text) "
-                "VALUES (:id, :domain, :text)",
-                id=nid, domain=domain, text=text,
-            )
-            count += 1
-        conn.commit()
-    return count
-
-
-def upsert_graph_edges(
-    mem, edges: list[dict], *, domain: str, table_prefix: str = "MEMORY_GRAPH",
-) -> int:
-    """Insert or update graph edges in Oracle."""
-    table_prefix = require_identifier(table_prefix, kind="table prefix")
-    pool = _require_pool(mem)
-    with pool.acquire() as conn:
-        cur = conn.cursor()
-        count = 0
-        for edge in edges:
-            src, dst, kind = edge["src"], edge["dst"], edge["kind"]
-            cur.execute(
-                f"MERGE INTO {table_prefix}_EDGES t "
-                "USING (SELECT :src AS src, :dst AS dst, :kind AS kind, "
-                ":domain AS domain FROM DUAL) s "
-                "ON (t.src = s.src AND t.dst = s.dst AND t.kind = s.kind "
-                "AND t.domain = s.domain) "
-                "WHEN NOT MATCHED THEN INSERT (src, dst, kind, domain) "
-                "VALUES (:src, :dst, :kind, :domain)",
-                src=src, dst=dst, kind=kind, domain=domain,
-            )
-            count += 1
-        conn.commit()
-    return count
-
-
-def load_graph(
-    mem, *, domain: str, table_prefix: str = "MEMORY_GRAPH",
-) -> dict:
-    """Load a previously stored graph from Oracle tables (offline fallback)."""
-    table_prefix = require_identifier(table_prefix, kind="table prefix")
-    pool = _require_pool(mem)
-    with pool.acquire() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            f"SELECT id, text FROM {table_prefix}_NODES WHERE domain = :domain",
-            domain=domain,
-        )
-        nodes = {row[0]: {"id": row[0], "text": row[1]} for row in cur}
-        cur.execute(
-            f"SELECT src, dst, kind FROM {table_prefix}_EDGES WHERE domain = :domain",
-            domain=domain,
-        )
-        edges = [{"src": row[0], "dst": row[1], "kind": row[2]} for row in cur]
-    return {"nodes": nodes, "edges": edges}
-
-
-# --------------------------------------------------------------------------- #
-# Internal helpers
-# --------------------------------------------------------------------------- #
-
-def _require_pool(mem):
-    pool = getattr(mem, "_pool", None)
-    if pool is None:
-        raise RuntimeError(
-            "Oracle PGQ requires a live Oracle connection pool "
-            "(AgentMemory built with memory_backend='real')."
-        )
-    return pool
+            chain = "".join(f" -[]- (n{i})" for i in range(h - 1)) + " -[]- (w)"
+            for start in range(0, len(anchors), _IN_LIST_MAX):
+                chunk = anchors[start:start + _IN_LIST_MAX]
+                binds = {f"a{i}": anchor for i, anchor in enumerate(chunk)}
+                in_list = ", ".join(f":{name}" for name in binds)
+                sql = f"""
+                    SELECT DISTINCT neighbor FROM GRAPH_TABLE ({graph_name}
+                      MATCH (v){chain}
+                      WHERE v.domain = :domain AND v.id IN ({in_list})
+                      COLUMNS (w.id AS neighbor)
+                    )
+                """
+                cur.execute(sql, {"domain": domain, **binds})
+                for (neighbor,) in cur.fetchall():
+                    if neighbor not in anchor_set:
+                        best.setdefault(neighbor, h)
+    return [
+        {"neighbor": neighbor, "hops": h}
+        for neighbor, h in sorted(best.items(), key=lambda kv: (kv[1], kv[0]))
+    ]

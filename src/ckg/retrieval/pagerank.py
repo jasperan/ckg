@@ -1,15 +1,30 @@
 """Personalized PageRank for code graphs.
 
-Pure NumPy implementation of Personalized PageRank, used as the structural
-ranking layer after PGQ retrieves the dependency neighborhood.
+Sparse NumPy implementation used as the structural ranking layer: lexical
+anchors say where the query lands, PPR says what is structurally close to
+those anchors.
 
-The split: Oracle PGQ finds which nodes are connected → Python's PPR ranks them
-by structural importance given lexical anchor seeds.
+Relevance has to travel against an edge as well as along it — the callers of
+a function matter when it changes, and a matched symbol should lift the file
+that contains it — so every edge is walked in both directions, with a weight
+per edge kind and direction.
 """
 
 from __future__ import annotations
 
 import numpy as np
+
+# (weight along the edge, weight against it)
+EDGE_WEIGHTS: dict[str, tuple[float, float]] = {
+    "contains": (0.5, 1.0),  # file → symbol; a symbol speaks strongly for its file
+    "import": (1.0, 0.5),    # importer → imported
+    "call": (1.0, 0.7),      # caller → callee
+    "co_edit": (1.0, 1.0),   # undirected
+}
+_DEFAULT_WEIGHT = (1.0, 0.5)
+# Files that changed together five times are not five times as related as a
+# pair that did once.
+_MAX_EDGE_MULTIPLIER = 3.0
 
 
 def personalized_pagerank(
@@ -18,122 +33,67 @@ def personalized_pagerank(
     *,
     alpha: float = 0.85,
     iters: int = 50,
+    tol: float = 1e-9,
 ) -> dict:
     """Compute Personalized PageRank over a graph.
 
     Args:
-        graph: A dict with "nodes" (dict of id→node) and "edges" (list of {src, dst, kind}).
-               Weights are derived from edges; all edges contribute equally.
-        seed_weights: {node_id: weight} — which nodes to personalize toward.
-        alpha: Teleport probability (0.85 = standard PPR).
-        iters: Number of power iterations.
+        graph: A dict with "nodes" (dict of id→node) and "edges" (list of
+            {src, dst, kind[, weight]}).
+        seed_weights: {node_id: weight} — the personalization vector.
+        alpha: Damping factor: the walk follows an edge with probability
+            ``alpha`` and teleports back to the seeds with ``1 - alpha``.
+        iters: Maximum number of power iterations.
+        tol: Stop early once an iteration moves less than this much mass.
 
     Returns:
-        {node_id: ppr_score} dict, sorted descending.
+        {node_id: score}; scores are a probability distribution (sum to 1).
+        Seeds absent from the graph are ignored; with no usable seed the
+        walk is unpersonalized.
 
-    Edge weights: each node distributes its mass equally to all outgoing
-    neighbors. A lazy self-loop (weight=1) is added so seed mass stays put
-    on connected nodes. Isolated nodes have their mass redistributed via
-    the teleport vector.
+    A node with no edges at all hands its mass back to the seeds.
     """
-    nodes = list(graph.get("nodes", {}).keys())
+    nodes = list(graph.get("nodes", {}))
     if not nodes:
         return {}
-
-    idx = {n: i for i, n in enumerate(nodes)}
+    idx = {node: i for i, node in enumerate(nodes)}
     n = len(nodes)
 
-    # Edge list as index arrays — O(E) memory instead of a dense n×n matrix.
     src_ix: list[int] = []
     dst_ix: list[int] = []
+    weights: list[float] = []
     for edge in graph.get("edges", []):
         s_i, d_i = idx.get(edge["src"]), idx.get(edge["dst"])
-        if s_i is not None and d_i is not None:
-            src_ix.append(s_i)
-            dst_ix.append(d_i)
+        if s_i is None or d_i is None or s_i == d_i:
+            continue
+        forward, backward = EDGE_WEIGHTS.get(edge.get("kind", ""), _DEFAULT_WEIGHT)
+        scale = min(float(edge.get("weight", 1.0)), _MAX_EDGE_MULTIPLIER)
+        src_ix += (s_i, d_i)
+        dst_ix += (d_i, s_i)
+        weights += (forward * scale, backward * scale)
     src_arr = np.asarray(src_ix, dtype=np.intp)
     dst_arr = np.asarray(dst_ix, dtype=np.intp)
+    w_arr = np.asarray(weights, dtype=np.float64)
 
-    # +1 per node for the lazy self-loop
-    out_degree = 1.0 + np.bincount(src_arr, minlength=n).astype(np.float64)
-    dangling = (out_degree == 1.0).astype(np.float64)  # only the self-loop
+    out_weight = np.bincount(src_arr, weights=w_arr, minlength=n)
+    dangling = out_weight == 0.0
+    transition = w_arr / out_weight[src_arr] if len(w_arr) else w_arr
 
-    def step(r: np.ndarray) -> np.ndarray:
-        share = r / out_degree
-        return share + np.bincount(dst_arr, weights=share[src_arr], minlength=n)
-
-    # Seed vector
     p = np.zeros(n, dtype=np.float64)
-    s = sum(seed_weights.values()) or 1.0
-    for node, w in seed_weights.items():
-        if node in idx:
-            p[idx[node]] = w / s
-    if p.sum() == 0:
-        p[:] = 1.0 / n
+    for node, weight in seed_weights.items():
+        i = idx.get(node)
+        if i is not None and weight > 0:
+            p[i] = weight
+    total = p.sum()
+    p = p / total if total > 0 else np.full(n, 1.0 / n)
 
-    # Power iteration
     r = p.copy()
     for _ in range(iters):
-        dmass = float(r @ dangling)
-        r = alpha * step(r) + alpha * dmass * p + (1 - alpha) * p
-
-    total = r.sum() or 1.0
-    r = r / total
+        spread = np.bincount(dst_arr, weights=r[src_arr] * transition, minlength=n)
+        nxt = alpha * (spread + r[dangling].sum() * p) + (1.0 - alpha) * p
+        moved = np.abs(nxt - r).sum()
+        r = nxt
+        if moved < tol:
+            break
 
     return {nodes[i]: float(r[i]) for i in range(n)}
-
-
-# Words that carry no signal for matching: English glue words, plus the words
-# the parser/enricher put in *every* node's text ("Module x.py in pkg.",
-# "run in x.py (pkg).", "def run(...)"). Without this a query containing
-# "in" matches every node and floods the anchors with arbitrary files.
-_STOPWORDS = frozenset({
-    "a", "an", "the", "of", "to", "in", "on", "at", "for", "and", "or", "is",
-    "it", "be", "as", "by", "with", "from", "that", "this", "py", "module", "def",
-})
-
-
-def seed_from_query(
-    query: str,
-    nodes: dict[str, dict],
-    *,
-    k: int = 5,
-) -> dict:
-    """Pick seed nodes by lexical overlap between query tokens and node text.
-
-    Each node contributes equally (weight=1.0) if any of its text tokens
-    match query tokens. This is the *lexical anchor* step — keyword entry
-    that mirrors what a coding agent would find by itself.
-
-    Args:
-        query: Natural-language query or feature description.
-        nodes: Dict of {node_id: {text: str, ...}}.
-        k: Maximum number of seed nodes.
-
-    Returns:
-        {node_id: 1.0} for each matched node, up to k.
-    """
-    import re
-    _token_re = re.compile(r"[a-z0-9_]+")
-
-    def _tokens(text: str) -> set[str]:
-        out: set[str] = set()
-        for raw in _token_re.findall(text.lower()):
-            if raw not in _STOPWORDS:
-                out.add(raw)
-            # Also split snake_case
-            parts = raw.split("_")
-            if len(parts) > 1:
-                out.update(p for p in parts if len(p) > 1 and p not in _STOPWORDS)
-        return out
-
-    query_tokens = _tokens(query)
-    scored: list[tuple[str, int]] = []
-    for nid, node in nodes.items():
-        text = node.get("text", nid)
-        node_tokens = _tokens(text)
-        overlap = len(query_tokens & node_tokens)
-        if overlap > 0:
-            scored.append((nid, overlap))
-    scored.sort(key=lambda x: -x[1])
-    return {nid: 1.0 for nid, _ in scored[:k]}

@@ -17,24 +17,3 @@ def format_price(amount: float) -> str:
 def sanitize_input(text: str) -> str:
     """Remove potentially dangerous characters from input."""
     return re.sub(r"[<>\"']", "", text)
-# another change
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py
-
-# changed with db.py

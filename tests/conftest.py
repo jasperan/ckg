@@ -1,115 +1,90 @@
 """Shared test fixtures for CKG tests."""
 
-import json
 import os
+import shutil
 import subprocess
-
-import pytest
 from pathlib import Path
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
-SAMPLE_PROJECT = FIXTURES_DIR / "sample_project"
-SAMPLE_PKG = SAMPLE_PROJECT / "sample_pkg"
+import pytest
+
+SAMPLE_PROJECT = Path(__file__).parent / "fixtures" / "sample_project"
+
+GIT_ENV = {
+    **os.environ,
+    "GIT_AUTHOR_NAME": "CKG Tests",
+    "GIT_AUTHOR_EMAIL": "tests@ckg.local",
+    "GIT_COMMITTER_NAME": "CKG Tests",
+    "GIT_COMMITTER_EMAIL": "tests@ckg.local",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+}
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _ensure_fixture_git():
-    """Reconstruct the sample-project git history if it is missing.
+def git(repo: Path, *args: str) -> str:
+    """Run git in ``repo`` with a fixed identity and no user configuration."""
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True, capture_output=True, text=True, env=GIT_ENV,
+    ).stdout
 
-    The fixture's nested ``.git`` is intentionally not committed to the
-    repository (embedded git repos break packaging and publishing). When
-    tests run from a fresh clone, this reconstructs the exact history the
-    co-edit tests depend on:
 
-        d2f789f initial: core, helpers, db modules
-        d6e7c27 fix: update core and db together (co-edit)
-        352b7a6 refactor: helpers + db updated together
+def commit_all(repo: Path, message: str) -> None:
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", message)
+
+
+def write_files(root: Path, files: dict[str, str]) -> None:
+    for rel, body in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+
+@pytest.fixture(scope="session")
+def sample_project_path(tmp_path_factory) -> Path:
+    """A git repository holding a copy of the sample project.
+
+    History (the tracked fixture files themselves are never modified):
+
+        initial: core, helpers, db modules
+        fix: update core and db together        → co-edit core.py + utils/db.py
+        refactor: helpers + db updated together → co-edit utils/db.py + utils/helpers.py
     """
-    git_dir = SAMPLE_PROJECT / ".git"
-    if git_dir.exists():
-        return
+    repo = tmp_path_factory.mktemp("fixture") / "sample_project"
+    shutil.copytree(SAMPLE_PROJECT, repo)
+    git(repo, "init", "-q")
+    commit_all(repo, "initial: core, helpers, db modules")
 
-    env = os.environ.copy()
-    env.update({
-        "GIT_AUTHOR_NAME": "CKG Tests",
-        "GIT_AUTHOR_EMAIL": "tests@ckg.local",
-        "GIT_COMMITTER_NAME": "CKG Tests",
-        "GIT_COMMITTER_EMAIL": "tests@ckg.local",
-    })
+    def touch(rel: str) -> None:
+        with (repo / "sample_pkg" / rel).open("a", encoding="utf-8") as fh:
+            fh.write("\n# edited\n")
 
-    def git(*args: str) -> None:
-        subprocess.run(
-            ["git", "-C", str(SAMPLE_PROJECT), *args],
-            check=True, capture_output=True, env=env,
-        )
-
-    # 1) initial commit — the whole tree
-    git("init", "-q")
-    git("add", "-A")
-    git("commit", "-q", "-m", "initial: core, helpers, db modules")
-
-    # 2) co-edit pair #1 — core.py + utils/db.py
-    _append(git, "sample_pkg/core.py", "# changed with db.py")
-    _append(git, "sample_pkg/utils/db.py", "# updated with core.py")
-    git("commit", "-q", "-am", "fix: update core and db together (co-edit)")
-
-    # 3) co-edit pair #2 — utils/db.py + utils/helpers.py
-    _append(git, "sample_pkg/utils/db.py", "# touched with helpers.py")
-    _append(git, "sample_pkg/utils/helpers.py", "# changed with db.py")
-    git("commit", "-q", "-am", "refactor: helpers + db updated together")
+    touch("core.py")
+    touch("utils/db.py")
+    commit_all(repo, "fix: update core and db together")
+    touch("utils/db.py")
+    touch("utils/helpers.py")
+    commit_all(repo, "refactor: helpers + db updated together")
+    return repo
 
 
-def _append(git, rel: str, line: str) -> None:
-    """Append a comment line to a fixture file and stage it."""
-    target = SAMPLE_PROJECT / rel
-    with target.open("a", encoding="utf-8") as fh:
-        fh.write(f"\n{line}\n")
-    git("add", rel)
+@pytest.fixture(scope="session")
+def sample_pkg_path(sample_project_path) -> Path:
+    """The Python package inside the sample project."""
+    return sample_project_path / "sample_pkg"
 
 
-@pytest.fixture(scope="module")
-def sample_project_path() -> Path:
-    """Path to the sample project fixture (git repo with Python code)."""
-    assert SAMPLE_PROJECT.is_dir(), f"Fixture not found: {SAMPLE_PROJECT}"
-    assert (SAMPLE_PROJECT / ".git").is_dir(), "Fixture not a git repo"
-    return SAMPLE_PROJECT
-
-
-@pytest.fixture(scope="module")
-def sample_pkg_path() -> Path:
-    """Path to the Python package within the fixture."""
-    p = SAMPLE_PKG
-    assert p.is_dir(), f"Package not found: {p}"
-    return p
-
-
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def sample_graph(sample_pkg_path) -> dict:
-    """Parse the sample project into a code graph (module-scoped, cached)."""
-    from ckg.graph.parser import parse_tree
-    return parse_tree(sample_pkg_path, pkg_root="sample_pkg")
+    """The sample package as a graph dict, as ``ckg build`` produces it."""
+    from ckg.graph.builder import build_graph
 
-
-@pytest.fixture(scope="module")
-def sample_graph_enriched(sample_pkg_path, sample_graph) -> dict:
-    """Parsed graph with enriched node text."""
-    from ckg.graph.builder import enrich_node_text
-    nodes = list(sample_graph["nodes"].values())
-    for node in nodes:
-        enrich_node_text(sample_pkg_path, node, "sample_pkg")
-    return {"nodes": {n["id"]: n for n in nodes}, "edges": sample_graph["edges"],
-            "meta": sample_graph["meta"]}
+    return build_graph(sample_pkg_path, pkg_root="sample_pkg")
 
 
 @pytest.fixture
-def sample_cg(sample_graph_enriched):
-    """CodeGraph object built from the enriched sample graph."""
+def sample_cg(sample_graph):
+    """CodeGraph object for the sample package."""
     from ckg.graph.builder import CodeGraph
-    return CodeGraph.from_dict(sample_graph_enriched)
 
-
-def load_graph_json(path: Path) -> dict:
-    """Load a cached graph JSON (if it exists)."""
-    if path.exists():
-        return json.loads(path.read_text())
-    return {"nodes": {}, "edges": []}
+    return CodeGraph.from_dict(sample_graph)
