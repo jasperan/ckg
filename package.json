@@ -1,7 +1,7 @@
 {
   "name": "@jasperan/ckg",
-  "version": "0.1.3",
-  "description": "Code Knowledge Graph (CKG) — structure-aware retrieval for coding agents. Parses codebases into typed graphs (imports/calls/co-edits), stores them in Oracle AI Database 26ai Free PGQ, and injects dependency-aware context into pi, Claude Code & Codex so agents find the right files faster.",
+  "version": "0.2.0",
+  "description": "Code Knowledge Graph (CKG) — structure-aware retrieval for coding agents. Parses Python codebases into typed graphs (imports/calls/co-edits), optionally stores them in Oracle AI Database PGQ, and injects dependency-aware context into pi, Claude Code & Codex so agents find the right files faster.",
   "license": "MIT",
   "author": "Nacho Martinez <jasperan@users.noreply.github.com>",
   "homepage": "https://github.com/jasperan/ckg",
@@ -30,7 +30,6 @@
     "pi/",
     "skills/",
     "src/",
-    "configs/",
     ".claude-plugin/",
     "hooks/",
     "commands/",
@@ -45,14 +44,21 @@
     "!**/*.egg-info/**"
   ],
   "scripts": {
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "typecheck": "tsc -p pi/tsconfig.json"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.6.0",
+    "@types/node": "^22.19.0",
+    "typebox": "1.3.27",
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.19.0"
   },
   "pi": {
     "extensions": [

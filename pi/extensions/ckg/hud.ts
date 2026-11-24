@@ -2,23 +2,20 @@
  * CKG HUD — footer status segment + transient activity feedback.
  *
  * Renders via `ctx.ui.setStatus("ckg", ...)` (persistent footer entry) and
- * `ctx.ui.notify(...)` (toast). Both are fire-and-forget and no-ops in
- * print/JSON modes, so headless runs are unaffected. Every path here is
- * try/catch-guarded — the HUD is cosmetic and must never break the agent loop.
+ * `ctx.ui.notify(...)` (toast). Every path is guarded: the HUD is cosmetic
+ * and must never break the agent loop.
  *
  * Base states:
- *   ● CKG on      — injection enabled (CKG_INJECT / config) and CLI found
+ *   ● CKG on      — injection enabled and CLI found
  *   ○ CKG off     — injection disabled (CKG_INJECT=0 or .ckg/pi.json inject:false)
  *   ◐ CKG no CLI  — enabled but the Python CLI is missing (tools degrade)
  *
- * Activity overlay (per-call, shown until the next update):
- *   ⚙ CKG building graph…            — background build kicked off
- *   CKG analyzing… / querying…       — transient busy text
- *   ✓ CKG map injected (n anchors)   — task feedback after success
+ * Activity overlay (shown until the next update):
+ *   ⚙ CKG building graph… / installing…  — background work running
+ *   CKG analyzing… / querying…           — transient busy text
+ *   ✓ CKG map injected (n anchors)       — feedback after success
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { existsSync } from "node:fs";
-import { discoverCli } from "./cli";
 import { loadSettings } from "./config";
 
 export type CkgHudState = "on" | "off" | "no-cli";
@@ -27,97 +24,70 @@ export type CkgHudState = "on" | "off" | "no-cli";
 export type CkgHudActivity =
   | { kind: "working"; detail: string } // busy text, e.g. "querying…"
   | { kind: "done"; detail: string } // success feedback, e.g. "map injected (5 anchors)"
-  | { kind: "building" } // background graph build running
-  | { kind: "idle" }; // force back to the base state
+  | { kind: "background"; detail: string }; // long-running background work
 
-export function computeHudState(projectRoot?: string): CkgHudState {
-  try {
-    const settings = loadSettings(projectRoot);
-    if (!settings.inject) return "off";
-    const cli = discoverCli();
-    if (!cli) return "no-cli";
-    // An env override pointing at a nonexistent file doesn't count as installed.
-    if (cli.source === "env CKG_CLI") {
-      const envPath = process.env.CKG_CLI || "";
-      if (envPath.includes("/") && !existsSync(envPath)) return "no-cli";
-    }
-    return "on";
-  } catch {
-    return "no-cli"; // cannot even evaluate settings -> degrade, never throw
-  }
+export function computeHudState(projectRoot: string | undefined, hasCli: boolean): CkgHudState {
+  if (!loadSettings(projectRoot).inject) return "off";
+  return hasCli ? "on" : "no-cli";
 }
 
-function colored(ui: unknown, color: string, text: string): string {
-  try {
-    const theme = (ui as { theme?: { fg?: (c: string, t: string) => string } }).theme;
-    if (typeof theme?.fg === "function") return theme.fg(color, text);
-  } catch {
-    /* fall through to plain text */
-  }
-  return text;
-}
+const BASE: Record<CkgHudState, { color: "accent" | "dim" | "warning"; text: string }> = {
+  on: { color: "accent", text: "● CKG on" },
+  off: { color: "dim", text: "○ CKG off" },
+  "no-cli": { color: "warning", text: "◐ CKG no CLI" },
+};
 
-function render(ui: unknown, state: CkgHudState, activity?: CkgHudActivity): string {
+function render(ctx: ExtensionContext, state: CkgHudState, activity?: CkgHudActivity): string {
+  const theme = ctx.ui.theme;
   switch (activity?.kind) {
-    case "building":
-      return colored(ui, "accent", "⚙ CKG building graph…");
+    case "background":
+      return theme.fg("accent", `⚙ CKG ${activity.detail}`);
     case "working":
-      return colored(ui, "accent", `CKG ${activity.detail}`);
+      return theme.fg("accent", `CKG ${activity.detail}`);
     case "done":
-      return colored(ui, "accent", `✓ CKG ${activity.detail}`);
+      return theme.fg("accent", `✓ CKG ${activity.detail}`);
     default:
-      break;
+      return theme.fg(BASE[state].color, BASE[state].text);
   }
-  const base: Record<CkgHudState, { color: string; text: string }> = {
-    on: { color: "accent", text: "● CKG on" },
-    off: { color: "dim", text: "○ CKG off" },
-    "no-cli": { color: "warn", text: "◐ CKG no CLI" },
-  };
-  const spec = base[state];
-  return colored(ui, spec.color, spec.text);
 }
 
-let _last: string | undefined;
+let last: string | undefined;
 
-/** Refresh the footer status. Safe to call often — re-renders only on change. */
+/**
+ * Refresh the footer status. Without an activity it shows the base state, so
+ * calling it after work ends clears any busy text. Re-renders only on change.
+ */
 export function updateHud(
-  ctx: ExtensionContext | undefined,
-  projectRoot?: string,
+  ctx: ExtensionContext,
+  projectRoot: string | undefined,
+  hasCli: boolean,
   activity?: CkgHudActivity,
 ): void {
   try {
-    const ui = ctx?.ui as { setStatus?: (k: string, t: string | undefined) => void } | undefined;
-    if (!ui?.setStatus) return;
-    const text = render(ui, computeHudState(projectRoot), activity);
-    if (text === _last) return;
-    _last = text;
-    ui.setStatus("ckg", text);
-  } catch {
-    /* HUD is cosmetic — never break the loop */
-  }
-}
-
-/** Clear the footer status (e.g. on session shutdown). */
-export function clearHud(ctx: ExtensionContext | undefined): void {
-  try {
-    const ui = ctx?.ui as { setStatus?: (k: string, t: string | undefined) => void } | undefined;
-    if (!ui?.setStatus) return;
-    _last = undefined;
-    ui.setStatus("ckg", undefined);
+    if (!ctx.hasUI) return;
+    const text = render(ctx, computeHudState(projectRoot, hasCli), activity);
+    if (text === last) return;
+    last = text;
+    ctx.ui.setStatus("ckg", text);
   } catch {
     /* cosmetic */
   }
 }
 
-/** Fire a one-time toast notification (guarded, cosmetic). */
-export function notifyHud(
-  ctx: ExtensionContext | undefined,
-  message: string,
-  type: "info" | "warning" = "info",
-): void {
+/** Clear the footer status (e.g. on session shutdown). */
+export function clearHud(ctx: ExtensionContext): void {
   try {
-    const ui = ctx?.ui as { notify?: (m: string, t?: string) => void } | undefined;
-    if (typeof ui?.notify === "function") ui.notify(message, type);
+    last = undefined;
+    if (ctx.hasUI) ctx.ui.setStatus("ckg", undefined);
+  } catch {
+    /* cosmetic */
+  }
+}
+
+/** Show a toast notification (guarded, cosmetic). */
+export function notifyHud(ctx: ExtensionContext, message: string, type: "info" | "warning" = "info"): void {
+  try {
+    if (ctx.hasUI) ctx.ui.notify(message, type);
   } catch {
     /* cosmetic */
   }

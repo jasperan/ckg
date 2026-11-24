@@ -2,134 +2,143 @@
  * CKG — Code Knowledge Graph pi plugin.
  *
  * Transparent background dependency analysis for pi. Parses your codebase into
- * a typed graph (imports / calls / co-edits), stores it in Oracle AI Database
- * 26ai Free PGQ (or a local cache), and injects a compact structure map into
+ * a typed graph (imports / calls / co-edits), keeps it in a local cache (and
+ * optionally in Oracle AI Database PGQ), and adds a compact structure map to
  * the system prompt on coding tasks so the agent finds the right files faster.
  *
  * Features:
  *   - Transparent injection: before_agent_start appends a structure map for
- *     coding prompts (keyword-gated, cached, short timeout, never throws).
+ *     coding prompts (keyword-gated, time-boxed, memoized per session, never
+ *     throws).
  *   - Tools: ckg_status, ckg_build, ckg_load, ckg_query, ckg_inject,
  *     ckg_oracle_status.
- *   - Command: /ckg — status + usage.
+ *   - Command: /ckg — status; /ckg on|off — toggle injection for the project.
  *
  * The Python CLI is required; it is auto-discovered (env CKG_CLI → bundled
- * venv → PATH). With CKG_ORACLE_DSN set, all retrieval runs through
- * Oracle PGQ (GRAPH_TABLE MATCH); otherwise it falls back to in-memory.
+ * venv → PATH). With CKG_ORACLE_DSN set, neighbourhoods are matched in Oracle
+ * PGQ (GRAPH_TABLE MATCH); otherwise in memory.
  *
- * HUD: a footer status segment (via ctx.ui.setStatus) shows whether CKG is
- * enabled (● on / ○ off / ◐ no CLI) plus live activity feedback
- * (analyzing… / ⚙ building… / ✓ map injected / ✓ graph ready) and one-time
- * toasts — cosmetic, never throws, no-op in headless modes.
+ * HUD: a footer status segment shows whether CKG is enabled (● on / ○ off /
+ * ◐ no CLI) plus activity feedback — cosmetic, never throws, absent in
+ * headless modes.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { isAbsolute, join } from "node:path";
 import { Type } from "typebox";
-import { join } from "node:path";
-import { discoverCli, runCli, installGuidance, type CliSpec } from "./cli";
-import { detectProject, graphCachePath } from "./project";
+import { describeFailure, installGuidance, runCli } from "./cli";
+import { saveSettings } from "./config";
 import {
+  abortBackground,
   buildMap,
   newSessionState,
+  sessionCli,
   statusBlock,
   type BuildHooks,
   type CkgSessionState,
 } from "./context";
-import { updateHud, clearHud, notifyHud } from "./hud";
+import { clearHud, notifyHud, updateHud, type CkgHudActivity } from "./hud";
+import { detectProject } from "./project";
+
+interface ToolOutput {
+  ok: boolean;
+  text: string;
+}
 
 export default function (pi: ExtensionAPI) {
   let state: CkgSessionState = newSessionState();
-  // Projects we already toasted about this session (injection / build done).
+  // One toast per project and kind per session.
   const notified = new Set<string>();
 
+  function hud(ctx: ExtensionContext, activity?: CkgHudActivity): void {
+    updateHud(ctx, detectProject(ctx.cwd)?.root, sessionCli(state) !== null, activity);
+  }
+
+  function notifyOnce(ctx: ExtensionContext, key: string, message: string, type: "info" | "warning" = "info"): void {
+    if (notified.has(key)) return;
+    notified.add(key);
+    notifyHud(ctx, message, type);
+  }
+
   pi.on("session_start", (_event, ctx) => {
+    abortBackground(state);
     state = newSessionState();
     notified.clear();
-    updateHud(ctx);
+    hud(ctx);
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
+    abortBackground(state);
     state = newSessionState();
     clearHud(ctx);
   });
 
   // ── Transparent injection ─────────────────────────────────────────────────
   pi.on("before_agent_start", async (event, ctx) => {
-    // Keep the HUD in sync with the project's effective settings (cheap:
-    // only re-renders when the text changes).
-    const root = detectProject(ctx.cwd)?.root;
-    updateHud(ctx, root);
-    if (!event.prompt) return;
-    // Skip before doing any work when a map is already present (avoids paying
-    // the inject subprocess cost on every prompt and pinning a stale map).
-    if (event.systemPrompt.includes("CKG Structure Map")) return;
+    hud(ctx);
+    // Runs started by a custom message carry no user prompt to retrieve for.
+    if (event.messageType !== "user" || !event.prompt) return;
+
+    const root = detectProject(ctx.cwd)?.root ?? "";
     const hooks: BuildHooks = {
-      onInjectStart: () => {
-        updateHud(ctx, root, { kind: "working", detail: "analyzing…" });
+      onInjectStart: () => hud(ctx, { kind: "working", detail: "analyzing…" }),
+      onInjectDone: (anchors) => {
+        if (anchors === 0) return hud(ctx); // no map: back to the base state
+        hud(ctx, { kind: "done", detail: `map injected (${anchors} anchors)` });
+        notifyOnce(ctx, `map:${root}`, `CKG injected structure map (${anchors} anchors) into this task.`);
       },
-      onBuildStarted: () => {
-        updateHud(ctx, root, { kind: "building" });
-      },
+      onBuildStarted: () => hud(ctx, { kind: "background", detail: "building graph…" }),
       onBuildDone: (ok) => {
-                updateHud(ctx, root, ok ? { kind: "done", detail: "graph ready" } : undefined);
-        const key = `build:${root ?? ""}`;
-        if (!notified.has(key)) {
-          notified.add(key);
-          notifyHud(
-            ctx,
-            ok
-              ? "CKG graph build finished — the next task gets the structure map."
-              : "CKG background graph build failed — run ckg_build to see why.",
-            ok ? "info" : "warning",
-          );
-        }
+        hud(ctx, ok ? { kind: "done", detail: "graph ready" } : undefined);
+        notifyOnce(
+          ctx,
+          `build:${root}`,
+          ok
+            ? "CKG graph build finished — the next task gets the structure map."
+            : "CKG background graph build failed — run ckg_build to see why.",
+          ok ? "info" : "warning",
+        );
       },
-      onMap: (anchors) => {
-        updateHud(ctx, root, { kind: "done", detail: `map injected (${anchors} anchors)` });
-        const key = `map:${root ?? ""}`;
-        if (!notified.has(key)) {
-          notified.add(key);
-          notifyHud(ctx, `CKG injected structure map (${anchors} anchors) into this task.`, "info");
-        }
+      onSetupStarted: () => hud(ctx, { kind: "background", detail: "installing Python CLI…" }),
+      onSetupDone: (ok) => {
+        hud(ctx);
+        notifyOnce(
+          ctx,
+          "setup",
+          ok ? "CKG is ready." : `CKG could not set up its Python CLI.\n${installGuidance()}`,
+          ok ? "info" : "warning",
+        );
       },
     };
-    const map = await buildMap(pi, state, event.prompt, ctx.cwd, hooks);
+    const map = await buildMap(state, event.prompt, ctx.cwd, hooks);
     if (!map) return;
-    const suffix = `\n\n${map}`;
-    return { systemPrompt: event.systemPrompt + suffix };
+    return { systemPrompt: `${event.systemPrompt}\n\n${map}` };
   });
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function resolvePath(p: string | undefined, ctx: ExtensionContext): string {
     if (!p) return ctx.cwd;
-    return p.startsWith("/") ? p : join(ctx.cwd, p);
+    return isAbsolute(p) ? p : join(ctx.cwd, p);
   }
 
-  async function execCli(ctx: ExtensionContext, args: string[], timeoutMs = 120_000): Promise<string> {
-    const cli: CliSpec | null = state.cli ?? discoverCli();
-    if (!cli) return `CKG CLI not found.\n\n${installGuidance()}`;
-    state.cli = cli;
-    const result = await runCli(cli, args, { timeoutMs, cwd: ctx.cwd });
-    if (result.code !== 0) {
-      const err = (result.stderr || result.stdout || "unknown error").trim().split("\n").slice(0, 8).join("\n");
-      return `ckg ${args.join(" ")} failed (exit ${result.code}):\n${err}`;
-    }
-    return result.stdout.trim();
-  }
-
-  /** Run a tool with busy/done HUD feedback; the text is the tool's output. */
-  async function withActivity(
+  async function execCli(
     ctx: ExtensionContext,
-    busy: string,
-    done: string,
-    fn: () => Promise<string>,
-  ): Promise<string> {
-    const root = detectProject(ctx.cwd)?.root;
-    updateHud(ctx, root, { kind: "working", detail: busy });
-    const out = await fn();
-    const failed =
-      out.startsWith("CKG CLI not found") || /\bfailed\b/.test(out.slice(0, 240)) || out.includes("(exit ");
-    updateHud(ctx, root, failed ? undefined : { kind: "done", detail: done });
-    return out;
+    args: string[],
+    signal: AbortSignal | undefined,
+    timeoutMs = 120_000,
+  ): Promise<ToolOutput> {
+    const cli = sessionCli(state);
+    if (!cli) return { ok: false, text: `CKG CLI not found.\n\n${installGuidance()}` };
+    const result = await runCli(cli, args, { timeoutMs, cwd: ctx.cwd, signal });
+    if (result.outcome !== "ok") return { ok: false, text: describeFailure(cli, args, result, timeoutMs) };
+    return { ok: true, text: result.stdout.trim() };
+  }
+
+  /** Run a tool with busy/done HUD feedback and return its text as the tool result. */
+  async function tool(ctx: ExtensionContext, busy: string, done: string, run: () => Promise<ToolOutput>) {
+    hud(ctx, { kind: "working", detail: busy });
+    const out = await run();
+    hud(ctx, out.ok ? { kind: "done", detail: done } : undefined);
+    return { content: [{ type: "text" as const, text: out.text }], details: {} };
   }
 
   // ── Tools ─────────────────────────────────────────────────────────────────
@@ -140,8 +149,8 @@ export default function (pi: ExtensionAPI) {
       "Check whether the Code Knowledge Graph (CKG) is installed, a project is detected, " +
       "the graph cache exists, and Oracle PGQ is configured/reachable.",
     parameters: Type.Object({}),
-    async execute(_id, _params, _signal, _onUpdate, ctx) {
-      return { content: [{ type: "text", text: await statusBlock(state, ctx.cwd) }], details: {} };
+    async execute(_id, _params, signal, _onUpdate, ctx) {
+      return { content: [{ type: "text", text: await statusBlock(state, ctx.cwd, signal) }], details: {} };
     },
   });
 
@@ -150,16 +159,20 @@ export default function (pi: ExtensionAPI) {
     label: "CKG Build Graph",
     description:
       "Parse a Python project into a code knowledge graph (import/call/co-edit edges) and cache " +
-      "it at <project>/.ckg/code_graph.json. Run this once per project before ckg_query/ckg_inject " +
-      "for the in-memory path.",
+      "it at <project>/.ckg/code_graph.json. The cache refreshes itself when sources change; " +
+      "run this to build it right now.",
     parameters: Type.Object({
       path: Type.String({ description: "Project or package directory to parse" }),
       pkg_root: Type.Optional(Type.String({ description: "Top-level package name (default: dir name)" })),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       const args = ["build", resolvePath(params.path, ctx)];
       if (params.pkg_root) args.push("--pkg-root", params.pkg_root);
-      return { content: [{ type: "text", text: await withActivity(ctx, "building…", "build done", () => execCli(ctx, args)) }], details: {} };
+      return tool(ctx, "building…", "build done", async () => {
+        const out = await execCli(ctx, args, signal, 600_000);
+        if (out.ok) state.memo.clear();
+        return out;
+      });
     },
   });
 
@@ -174,11 +187,11 @@ export default function (pi: ExtensionAPI) {
       pkg_root: Type.Optional(Type.String({ description: "Top-level package name (default: dir name)" })),
       domain: Type.Optional(Type.String({ description: "PGQ domain scope (default: CKG_ORACLE_DOMAIN or 'default')" })),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       const args = ["load", resolvePath(params.path, ctx)];
       if (params.pkg_root) args.push("--pkg-root", params.pkg_root);
       if (params.domain) args.push("--domain", params.domain);
-      return { content: [{ type: "text", text: await withActivity(ctx, "loading → PGQ…", "loaded → PGQ", () => execCli(ctx, args, 180_000)) }], details: {} };
+      return tool(ctx, "loading → PGQ…", "loaded → PGQ", () => execCli(ctx, args, signal, 600_000));
     },
   });
 
@@ -192,16 +205,16 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       query: Type.String({ description: "Feature description or retrieval query" }),
       graph: Type.Optional(Type.String({ description: "Path to code_graph.json (default: <cwd>/.ckg/code_graph.json)" })),
-      top_k: Type.Optional(Type.Number({ description: "Max results (default 10)" })),
-      hops: Type.Optional(Type.Number({ description: "Graph reach depth (default 2)" })),
+      top_k: Type.Optional(Type.Integer({ minimum: 0, description: "Max results (default 10)" })),
+      hops: Type.Optional(Type.Integer({ minimum: 1, description: "Graph reach depth (default 2)" })),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       const args = ["query"];
       if (params.graph) args.push("--graph", resolvePath(params.graph, ctx));
-      if (params.top_k) args.push("--top-k", String(params.top_k));
-      if (params.hops) args.push("--hops", String(params.hops));
+      if (params.top_k !== undefined) args.push("--top-k", String(params.top_k));
+      if (params.hops !== undefined) args.push("--hops", String(params.hops));
       args.push("--", params.query); // "--": query may start with "-"
-      return { content: [{ type: "text", text: await withActivity(ctx, "querying…", "query done", () => execCli(ctx, args)) }], details: {} };
+      return tool(ctx, "querying…", "query done", () => execCli(ctx, args, signal));
     },
   });
 
@@ -215,11 +228,11 @@ export default function (pi: ExtensionAPI) {
       query: Type.String({ description: "Task description" }),
       root: Type.Optional(Type.String({ description: "Project root (default: auto-detected)" })),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const args = ["inject"];
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      const args = ["inject", "--refresh", "sync"]; // explicit call: wait for a current graph
       if (params.root) args.push("--root", resolvePath(params.root, ctx));
       args.push("--", params.query); // "--": query may start with "-"
-      return { content: [{ type: "text", text: await withActivity(ctx, "injecting…", "map ready", () => execCli(ctx, args)) }], details: {} };
+      return tool(ctx, "injecting…", "map ready", () => execCli(ctx, args, signal, 600_000));
     },
   });
 
@@ -227,27 +240,34 @@ export default function (pi: ExtensionAPI) {
     name: "ckg_oracle_status",
     label: "CKG Oracle Status",
     description:
-      "Check Oracle AI Database 26ai Free connectivity, version, and stored graph stats for the " +
-      "configured PGQ domain. In-memory mode when CKG_ORACLE_DSN is not set.",
+      "Check Oracle AI Database connectivity, version, stored graph stats for the configured " +
+      "PGQ domain, and which retrieval mode is in effect.",
     parameters: Type.Object({}),
-    async execute(_id, _params, _signal, _onUpdate, ctx) {
-      return { content: [{ type: "text", text: await withActivity(ctx, "checking PGQ…", "PGQ ok", () => execCli(ctx, ["oracle-status"], 20_000)) }], details: {} };
+    async execute(_id, _params, signal, _onUpdate, ctx) {
+      return tool(ctx, "checking PGQ…", "PGQ ok", () => execCli(ctx, ["oracle-status"], signal, 20_000));
     },
   });
 
   // ── Command ───────────────────────────────────────────────────────────────
   pi.registerCommand("ckg", {
-    description: "CKG — Code Knowledge Graph status and usage",
-    handler: async (_args, ctx) => {
+    description: "CKG status; `/ckg on` or `/ckg off` toggles structure-map injection for this project",
+    handler: async (args, ctx) => {
+      const arg = args.trim().toLowerCase();
+      if (arg === "on" || arg === "off") {
+        const root = detectProject(ctx.cwd)?.root;
+        const saved = saveSettings(root, { inject: arg === "on" });
+        hud(ctx);
+        ctx.ui.notify(
+          saved
+            ? `CKG injection ${arg} for ${root ?? "all projects"}.`
+            : "CKG could not write its settings file.",
+          saved ? "info" : "warning",
+        );
+        return;
+      }
       const out = await statusBlock(state, ctx.cwd);
       ctx.ui.notify(out.split("\n").slice(0, 3).join(" · "), "info");
-      ctx.ui.setWidget("ckg", out.split("\n").slice(0, 12));
+      ctx.ui.setWidget("ckg", out.split("\n").slice(0, 14));
     },
   });
-
-  // ── Session-scoped cleanup for background builds ──────────────────────────
-  // (background `ckg build` processes are short-lived; nothing else to clean)
 }
-
-/** Export state for tests/tools that import the module directly. */
-export { newSessionState, graphCachePath };

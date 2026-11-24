@@ -3,22 +3,27 @@
  * CKG postinstall — best-effort setup of the bundled Python environment.
  *
  * Creates `<package>/.venv` with the `ckg` CLI so the pi extension and Claude
- * Code hooks work without any manual Python setup. Uses `uv` when available
+ * Code hook work without any manual Python setup. Uses `uv` when available
  * (fast, lockfile-pinned), falls back to `python3 -m venv` + pip.
  *
- * This is intentionally non-fatal: if neither uv nor python3 exists, the
- * extension degrades gracefully (it will look for `ckg` on PATH and report a
- * helpful error otherwise).
+ * Never fails the npm install: when no environment can be set up, the
+ * extension looks for `ckg` on PATH and otherwise reports how to install it.
+ * Set CKG_SKIP_POSTINSTALL=1 to skip this step. The pi extension runs this
+ * script itself on first use when the environment is missing, so installs
+ * done with `--ignore-scripts` still work.
  */
 "use strict";
 
 const { spawnSync } = require("node:child_process");
-const { existsSync, mkdirSync } = require("node:fs");
+const { existsSync } = require("node:fs");
 const { join } = require("node:path");
 
 const ROOT = join(__dirname, "..");
 const VENV = join(ROOT, ".venv");
-const VENV_BIN = process.platform === "win32" ? join(VENV, "Scripts") : join(VENV, "bin");
+const WINDOWS = process.platform === "win32";
+const VENV_BIN = join(VENV, WINDOWS ? "Scripts" : "bin");
+const VENV_CKG = join(VENV_BIN, WINDOWS ? "ckg.exe" : "ckg");
+const MIN_PYTHON = [3, 12];
 
 function log(msg) {
   console.log(`[ckg] ${msg}`);
@@ -28,64 +33,63 @@ function warn(msg) {
   console.error(`[ckg] ${msg}`);
 }
 
-function run(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", stdio: "inherit", ...opts });
-  if (r.error) throw r.error;
-  return r.status === 0;
+function run(cmd, args) {
+  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", stdio: "inherit" });
+  return !r.error && r.status === 0;
 }
 
-function venvCkg() {
-  const bin = process.platform === "win32" ? "ckg.exe" : "ckg";
-  return join(VENV_BIN, bin);
+/** [major, minor] of `python3`, or null when it is absent. */
+function pythonVersion() {
+  const r = spawnSync("python3", ["--version"], { encoding: "utf8" });
+  const match = !r.error && r.status === 0 && /(\d+)\.(\d+)/.exec(`${r.stdout}${r.stderr}`);
+  return match ? [Number(match[1]), Number(match[2])] : null;
 }
 
-async function main() {
-  // Already set up?
-  if (existsSync(venvCkg()) && existsSync(join(VENV_BIN, process.platform === "win32" ? "python.exe" : "python"))) {
+function main() {
+  if (process.env.CKG_SKIP_POSTINSTALL === "1") {
+    log("CKG_SKIP_POSTINSTALL=1 — skipping Python environment setup.");
+    return;
+  }
+  if (existsSync(VENV_CKG)) {
     log("Python environment already present — skipping.");
-    return 0;
+    return;
   }
 
-  // 1) uv — preferred
+  // 1) uv — preferred: installs the locked versions and fetches Python itself.
   const uv = spawnSync("uv", ["--version"], { encoding: "utf8" });
   if (!uv.error && uv.status === 0) {
     log("Setting up Python environment with uv ...");
-    try {
-      if (run("uv", ["sync", "--no-dev", "--frozen"])) {
-        log(`Done. CLI at ${venvCkg()}`);
-        return 0;
-      }
-    } catch (e) {
-      warn(`uv sync failed: ${e.message}`);
+    if (run("uv", ["sync", "--no-dev", "--frozen"]) && existsSync(VENV_CKG)) {
+      log(`Done. CLI at ${VENV_CKG}`);
+      return;
     }
+    warn("uv sync failed.");
   }
 
   // 2) python3 + venv + pip
-  const py = spawnSync("python3", ["--version"], { encoding: "utf8" });
-  if (!py.error && py.status === 0) {
+  const version = pythonVersion();
+  if (version === null) {
+    warn("Neither uv nor python3 was found.");
+  } else if (version[0] < MIN_PYTHON[0] || (version[0] === MIN_PYTHON[0] && version[1] < MIN_PYTHON[1])) {
+    warn(`Python ${MIN_PYTHON.join(".")}+ required (found ${version.join(".")}).`);
+  } else {
     log("Setting up Python environment with python3 + venv ...");
-    try {
-      if (!run("python3", ["-m", "venv", VENV])) throw new Error("venv creation failed");
-      const pip = process.platform === "win32" ? join(VENV_BIN, "pip.exe") : join(VENV_BIN, "pip");
-      if (run(pip, ["install", "--quiet", "--upgrade", "pip"])) {
-        if (run(pip, ["install", "--quiet", "."])) {
-          log(`Done. CLI at ${venvCkg()}`);
-          return 0;
-        }
-      }
-    } catch (e) {
-      warn(`pip install failed: ${e.message}`);
+    const pip = join(VENV_BIN, WINDOWS ? "pip.exe" : "pip");
+    if (run("python3", ["-m", "venv", VENV]) && run(pip, ["install", "--quiet", "."]) && existsSync(VENV_CKG)) {
+      log(`Done. CLI at ${VENV_CKG}`);
+      return;
     }
+    warn("pip install failed.");
   }
 
   warn(
     "Could not set up the bundled Python environment. Install the ckg CLI manually: " +
-      "`pip install ckg` or `uv tool install ckg`, or set CKG_CLI=/path/to/ckg."
+      "`uv tool install git+https://github.com/jasperan/ckg.git`, or set CKG_CLI=/path/to/ckg.",
   );
-  return 0; // never fail the npm install
 }
 
-main().catch((e) => {
+try {
+  main();
+} catch (e) {
   warn(`postinstall error: ${e.message}`);
-  process.exit(0);
-});
+}

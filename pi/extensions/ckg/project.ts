@@ -1,12 +1,13 @@
 /**
  * CKG activation + project detection helpers.
  *
- * Mirrors the Claude Code skill's activation heuristics: only inject a
+ * Mirrors the Claude Code hook's activation heuristics: only inject a
  * structure map when the user's prompt looks like a coding task and we are
  * inside a project (`.git`, `pyproject.toml`, or `package.json`).
  */
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 const CODING_KEYWORDS = [
   "implement", "add ", "fix", "change", "refactor", "build", "create",
@@ -32,22 +33,27 @@ export interface DetectedProject {
   marker: string;
 }
 
-/** Walk upward from cwd looking for a project root marker. */
+const MARKERS = [".git", "pyproject.toml", "package.json"];
+
+/**
+ * Walk upward from cwd looking for a project root marker. The home directory
+ * and the filesystem root never count as a project.
+ */
 export function detectProject(cwd: string): DetectedProject | null {
+  const home = homedir();
   let dir = cwd;
-  for (let i = 0; i < 12; i++) {
-    try {
-      if (existsSync(join(dir, ".git"))) return { root: dir, marker: ".git" };
-      if (existsSync(join(dir, "pyproject.toml"))) return { root: dir, marker: "pyproject.toml" };
-      if (existsSync(join(dir, "package.json"))) return { root: dir, marker: "package.json" };
-    } catch {
-      return null;
+  for (;;) {
+    const parent = dirname(dir);
+    if (dir === home || parent === dir) return null;
+    for (const marker of MARKERS) {
+      try {
+        if (existsSync(join(dir, marker))) return { root: dir, marker };
+      } catch {
+        return null;
+      }
     }
-    const parent = dir === "/" ? null : dir.slice(0, dir.lastIndexOf("/")) || "/";
-    if (parent === null || parent === dir) break;
     dir = parent;
   }
-  return null;
 }
 
 /** Graph cache location for a project. */
@@ -55,7 +61,15 @@ export function graphCachePath(root: string): string {
   return join(root, ".ckg", "code_graph.json");
 }
 
-/** True when the CKG graph cache exists for a project. */
-export function hasGraphCache(root: string): boolean {
-  return existsSync(graphCachePath(root));
+/**
+ * Identity of the current graph cache (mtime + size), or null when there is
+ * none. A rebuild changes it, which is what invalidates memoized maps.
+ */
+export function graphCacheStamp(root: string): string | null {
+  try {
+    const st = statSync(graphCachePath(root));
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return null;
+  }
 }
